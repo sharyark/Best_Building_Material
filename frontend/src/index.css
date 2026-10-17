@@ -9,3 +9,13 @@ body { margin: 0; background: #f5f7fa; }
 @media print {
   .ant-layout-sider, .ant-layout-header { display: none !important; }
 }
+
+.ant-card { border-radius: 12px; }
+.ant-layout-sider { background: linear-gradient(180deg, #0f2b47 0%, #0b2036 100%) !important; }
+.ant-menu-dark { background: transparent !important; }
+.ant-table-thead > tr > th { background: #f6f8fa !important; font-weight: 600; }
+@media (max-width: 800px) {
+  .login-grid { grid-template-columns: 1fr !important; }
+  .login-art { display: none !important; }
+}
+@media (max-width: 600px) { .hero-art { opacity: .22; } }

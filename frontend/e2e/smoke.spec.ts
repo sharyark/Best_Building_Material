@@ -14,7 +14,7 @@ async function signIn(page: Page, who: { phone: string; password: string }) {
   await page.getByLabel('Phone / username').fill(who.phone)
   await page.getByLabel('Password').fill(who.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
-  await expect(page.getByRole('heading', { name: 'Dashboard', exact: true })).toBeVisible()
+  await expect(page.getByRole('heading', { name: /Good (morning|afternoon|evening)/ })).toBeVisible()
 }
 
 /** Anything a user would see as an error in the browser console. */
@@ -63,9 +63,10 @@ test.describe('admin', () => {
   test.afterAll(async () => ctx.close())
 
   test('dashboard shows seeded demo numbers', async () => {
-    await expect(page.getByText('Total receivable (customers owe us)')).toBeVisible()
+    await expect(page.getByText('Receivable: customers owe us')).toBeVisible()
     await expect(page.getByText('Biggest outstanding balances')).toBeVisible()
-    await expect(page.locator('.ant-statistic-content-value').first()).not.toHaveText('')
+    await expect(page.getByText(/Rs [\d,]+\.\d{2}/).first()).toBeVisible()
+    await expect(page.getByRole('button', { name: 'New challan' })).toBeVisible()
   })
 
   test('every page opens without console errors', async () => {

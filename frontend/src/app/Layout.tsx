@@ -114,7 +114,10 @@ export default function AppLayout() {
     <Layout style={{ minHeight: '100vh' }}>
       {!mobile && (
         <Sider width={230} theme="dark" style={{ position: 'sticky', top: 0, height: '100vh', overflow: 'auto' }}>
-          <div style={{ color: '#fff', fontWeight: 600, fontSize: 17, padding: '18px 20px' }}>{t('app.name')}</div>
+          <div style={{ color: '#fff', fontWeight: 600, fontSize: 17, padding: '18px 20px', display: 'flex', alignItems: 'center', gap: 10 }}>
+            <img src="/favicon.svg" alt="" width={28} height={28} />
+            {t('app.name')}
+          </div>
           {menu}
         </Sider>
       )}
