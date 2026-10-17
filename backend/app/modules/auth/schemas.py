@@ -8,6 +8,8 @@ Role = Literal["admin", "accountant", "driver", "customer"]
 class LoginIn(BaseModel):
     phone: str = Field(min_length=1, max_length=30)
     password: str = Field(min_length=1, max_length=200)
+    # Which login page was used. When given, the account's role must match it (owner vs munshi pages).
+    portal: Literal["admin", "accountant"] | None = None
 
 
 class UserOut(BaseModel):

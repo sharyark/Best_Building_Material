@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Col, Input, Row, Select, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useSave } from '@/api/hooks'
 import { useLookups } from '@/api/lookups'
@@ -13,6 +13,8 @@ import { DocPage, type DocFormProps } from '@/components/DocPage'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
 import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
+import { QuickAddParty } from '@/components/QuickAdd'
+import { usePermission } from '@/hooks/usePermission'
 import { formatDate, today } from '@/lib/date'
 import { formatQty, toNumber } from '@/lib/format'
 import { rentalSchema, type RentalForm } from '@/lib/schemas'
@@ -20,7 +22,9 @@ import { rentalSchema, type RentalForm } from '@/lib/schemas'
 function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
   const lookups = useLookups()
   const clientRef = useRef(crypto.randomUUID())
-  const { control, handleSubmit } = useForm<RentalForm>({
+  const canAdd = usePermission('masters.write')
+  const [adding, setAdding] = useState<string | null>(null)
+  const { control, handleSubmit, setValue } = useForm<RentalForm>({
     resolver: zodResolver(rentalSchema),
     defaultValues: {
       date: doc?.date ?? today(), customer_id: doc?.customer_id as number, site_id: doc?.site_id ?? null, vehicle_id: doc?.vehicle_id as number,
@@ -40,7 +44,7 @@ function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
     >
       <Row gutter={12}>
         <Col xs={24} sm={8}><Field control={control} name="date" label="Date" required>{(f) => <DateField id={f.id} value={f.value} onChange={f.onChange} />}</Field></Col>
-        <Col xs={24} sm={16}><Field control={control} name="customer_id" label="Customer" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.customers)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus />}</Field></Col>
+        <Col xs={24} sm={16}><Field control={control} name="customer_id" label="Customer" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.customers)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus addLabel="New customer" onAdd={canAdd ? (n) => setAdding(n) : undefined} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="site_id" label="Site">{(f) => <EntitySelect id={f.id} options={optionsOf(sites)} value={f.value} onChange={f.onChange} disabled={!customerId} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="vehicle_id" label="Machine" required>{(f) => <EntitySelect id={f.id} options={optionsOf(machines)} value={f.value} onChange={f.onChange} allowClear={false} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="operator_id" label="Operator">{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.drivers)} value={f.value} onChange={f.onChange} />}</Field></Col>
@@ -49,6 +53,7 @@ function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
         <Col xs={12}><Field control={control} name="rate" label={`Rate per ${basis}`} required>{(f) => <MoneyInput {...f} />}</Field></Col>
         <Col xs={24}><Field control={control} name="notes" label="Notes">{(f) => <Input {...f} value={f.value ?? ''} />}</Field></Col>
       </Row>
+      <QuickAddParty open={adding !== null} type="customer" initialName={adding ?? ''} onClose={() => setAdding(null)} onCreated={(p) => setValue('customer_id', p.id, { shouldValidate: true })} />
     </DocFormShell>
   )
 }

@@ -39,7 +39,7 @@ def _set_refresh_cookie(response: Response, raw: str) -> None:
 @router.post("/login", response_model=TokenOut)
 def login(data: LoginIn, request: Request, response: Response, db: DB):
     service.check_login_rate(db, client_ip(request) or "unknown")
-    user = service.authenticate(db, data.phone, data.password)
+    user = service.authenticate(db, data.phone, data.password, data.portal)
     token, raw = service.issue_tokens(db, user)
     db.commit()
     _set_refresh_cookie(response, raw)

@@ -4,7 +4,7 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import Session
 
 from app.core.config import get_settings
-from app.core.errors import Conflict, NotFound, TooManyAttempts, Unauthorized
+from app.core.errors import Conflict, Forbidden, NotFound, TooManyAttempts, Unauthorized
 from app.core.permissions import permissions_for
 from app.core.security import (
     DUMMY_HASH,
@@ -47,12 +47,18 @@ def check_login_rate(db: Session, ip: str) -> None:
         raise TooManyAttempts("Too many login attempts. Try again in a minute.")
 
 
-def authenticate(db: Session, phone: str, password: str) -> User:
+def authenticate(db: Session, phone: str, password: str, portal: str | None = None) -> User:
     user = db.scalar(select(User).where(User.phone == phone))
     # Always run one hash verification so response time doesn't reveal whether the phone exists.
     ok = verify_password(user.password_hash if user else DUMMY_HASH, password)
     if not user or not ok or not user.is_active:
         raise Unauthorized("Wrong phone or password", code="INVALID_CREDENTIALS")
+    # Checked only after the password is right, so it can't be used to discover which phones exist.
+    if portal and user.role != portal:
+        other = "accountant" if user.role == "accountant" else "owner (admin)"
+        raise Forbidden(
+            f"This is an {other} account. Please use the {other.split()[0]} login page.", code="WRONG_PORTAL"
+        )
     user.last_login_at = _now()
     return user
 

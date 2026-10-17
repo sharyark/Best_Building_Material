@@ -13,6 +13,8 @@ import { MoneyInput, QtyInput } from '@/components/DecimalInput'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
 import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
+import { QuickAddParty, QuickAddSite } from '@/components/QuickAdd'
+import { usePermission } from '@/hooks/usePermission'
 import { formatQty, toNumber } from '@/lib/format'
 import { today } from '@/lib/date'
 import { deliverySchema, type DeliveryForm } from '@/lib/schemas'
@@ -57,6 +59,8 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
   const rateTouched = useRef(editing)
   const [rateSource, setRateSource] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
+  const canAdd = usePermission('masters.write')
+  const [quick, setQuick] = useState<{ kind: 'customer' | 'site'; name: string } | null>(null)
 
   const { control, handleSubmit, reset, setValue, getValues } = useForm<DeliveryForm>({
     resolver: zodResolver(deliverySchema),
@@ -165,6 +169,8 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
                 value={f.value}
                 allowClear={false}
                 placeholder="Type customer name"
+                addLabel="New customer"
+                onAdd={canAdd ? (name) => setQuick({ kind: 'customer', name }) : undefined}
                 onChange={(v) => {
                   f.onChange(v)
                   setValue('site_id', null)
@@ -176,7 +182,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         </Col>
         <Col xs={24} sm={12} lg={6}>
           <Field control={control} name="site_id" label="Site">
-            {(f) => <EntitySelect id={f.id} options={optionsOf(sites)} value={f.value} onChange={f.onChange} placeholder={customerId ? 'Select site' : 'Pick customer first'} disabled={!customerId} />}
+            {(f) => <EntitySelect id={f.id} options={optionsOf(sites)} value={f.value} onChange={f.onChange} placeholder={customerId ? 'Select site' : 'Pick customer first'} disabled={!customerId} addLabel="New site" onAdd={canAdd && customerId ? (name) => setQuick({ kind: 'site', name }) : undefined} />}
           </Field>
         </Col>
         <Col xs={24} sm={12} lg={7}>
@@ -263,6 +269,24 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
           }
         />
       )}
+      <QuickAddParty
+        open={quick?.kind === 'customer'}
+        type="customer"
+        initialName={quick?.name ?? ''}
+        onClose={() => setQuick(null)}
+        onCreated={(p) => {
+          setValue('customer_id', p.id, { shouldValidate: true })
+          setValue('site_id', null)
+          rateTouched.current = editing
+        }}
+      />
+      <QuickAddSite
+        open={quick?.kind === 'site'}
+        partyId={customerId ?? null}
+        initialName={quick?.name ?? ''}
+        onClose={() => setQuick(null)}
+        onCreated={(s) => setValue('site_id', s.id, { shouldValidate: true })}
+      />
     </Form>
   )
 }

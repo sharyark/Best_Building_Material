@@ -7,6 +7,11 @@ import { api } from '@/api/client'
 import type { Delivery } from '@/api/types'
 import ChallanForm from './ChallanForm'
 
+// The form only offers "New customer" to roles that may edit masters (the accountant can).
+vi.mock('@/app/AuthContext', () => ({
+  useAuth: () => ({ user: { role: 'accountant' }, can: (perm: string) => perm === 'masters.write' }),
+}))
+
 const page = <T,>(items: T[]) => ({ items, total: items.length, page: 1, size: 500 })
 
 const delivery: Delivery = {

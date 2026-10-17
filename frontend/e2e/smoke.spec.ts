@@ -9,8 +9,8 @@ import { expect, test, type BrowserContext, type Page } from '@playwright/test'
 const ADMIN = { phone: 'admin', password: 'admin12345' }
 const MUNSHI = { phone: 'munshi', password: 'munshi12345' }
 
-async function signIn(page: Page, who: { phone: string; password: string }) {
-  await page.goto('/login')
+async function signIn(page: Page, who: { phone: string; password: string }, portal: 'admin' | 'accountant') {
+  await page.goto(`/${portal}/login`)
   await page.getByLabel('Phone / username').fill(who.phone)
   await page.getByLabel('Password').fill(who.password)
   await page.getByRole('button', { name: 'Sign in' }).click()
@@ -29,22 +29,32 @@ function watchErrors(page: Page) {
 }
 
 test.describe('signed out', () => {
-  test('wrong password shows an error and stays on login', async ({ page }) => {
-    await page.goto('/login')
+  test('wrong password shows an error and stays on the login page', async ({ page }) => {
+    await page.goto('/admin/login')
     await page.getByLabel('Phone / username').fill('admin')
     await page.getByLabel('Password').fill('definitely-wrong')
     await page.getByRole('button', { name: 'Sign in' }).click()
     await expect(page.getByText('Wrong phone or password')).toBeVisible()
-    await expect(page).toHaveURL(/login/)
+    await expect(page).toHaveURL(/admin\/login/)
   })
 
-  test('unauthenticated visit redirects to login, then returns to the page after sign-in', async ({ page }) => {
-    await page.goto('/payments')
-    await expect(page).toHaveURL(/login/)
-    await page.getByLabel('Phone / username').fill(ADMIN.phone)
-    await page.getByLabel('Password').fill(ADMIN.password)
+  test('the munshi cannot sign in on the owner page', async ({ page }) => {
+    await page.goto('/admin/login')
+    await expect(page.getByRole('heading', { name: 'Owner sign-in' })).toBeVisible()
+    await page.getByLabel('Phone / username').fill(MUNSHI.phone)
+    await page.getByLabel('Password').fill(MUNSHI.password)
     await page.getByRole('button', { name: 'Sign in' }).click()
-    await expect(page.getByRole('heading', { name: 'Payments & receipts', exact: true })).toBeVisible()
+    await expect(page.getByText(/This is an accountant account/)).toBeVisible()
+    await expect(page).toHaveURL(/admin\/login/)
+  })
+
+  test('/login lets you choose a door; protected pages send you to a login page', async ({ page }) => {
+    await page.goto('/payments')
+    await expect(page).toHaveURL(/\/login$/)
+    await expect(page.getByText('Who is signing in?')).toBeVisible()
+    await page.getByText('Munshi (accountant)').click()
+    await expect(page).toHaveURL(/accountant\/login/)
+    await expect(page.getByRole('heading', { name: 'Munshi sign-in' })).toBeVisible()
   })
 })
 
@@ -58,7 +68,7 @@ test.describe('admin', () => {
     ctx = await browser.newContext({ viewport: { width: 1366, height: 800 } })
     page = await ctx.newPage()
     errors = watchErrors(page)
-    await signIn(page, ADMIN)
+    await signIn(page, ADMIN, 'admin')
   })
   test.afterAll(async () => ctx.close())
 
@@ -109,10 +119,11 @@ test.describe('admin', () => {
     await page.goto('/masters')
     await expect(page.getByRole('columnheader', { name: /Balance/ })).toBeVisible()
     await page.getByRole('button', { name: /Add customer/ }).click()
-    await page.getByLabel('Name', { exact: true }).fill('E2E Test Customer')
+    const name = `E2E Customer ${Date.now()}`
+    await page.getByLabel('Name', { exact: true }).fill(name)
     await page.getByRole('button', { name: 'Save', exact: true }).click()
     await expect(page.getByText('Customer saved')).toBeVisible()
-    await expect(page.getByText('E2E Test Customer')).toBeVisible()
+    await expect(page.getByText(name)).toBeVisible()
   })
 
   test('keyboard-first challan entry: type, Enter, save, form resets', async () => {
@@ -132,10 +143,27 @@ test.describe('admin', () => {
     expect(errors).toEqual([])
   })
 
+  test('a new customer can be added from inside the challan form and is selected', async () => {
+    await page.goto('/challans')
+    const name = `Quick Customer ${Date.now()}`
+    await page.getByLabel('Customer', { exact: true }).fill(name)
+    await page.getByRole('button', { name: /New customer/ }).click()
+    await expect(page.getByLabel('Name', { exact: true })).toHaveValue(name)
+    await page.getByLabel('Phone (also used for WhatsApp statements)').fill('0300-5550000')
+    await page.getByRole('button', { name: 'Add customer' }).click()
+    await expect(page.getByText('New customer added')).toBeVisible()
+    await expect(page.locator('.ant-select-selection-item', { hasText: name })).toBeVisible()
+    // and the new customer exists in the masters list with a zero balance
+    await page.goto('/masters')
+    await page.getByPlaceholder('Search customer…').fill(name)
+    await expect(page.getByRole('row', { name: new RegExp(name) })).toContainText('0.00')
+  })
+
   test('attendance grid: tap cells then save', async () => {
     await page.goto('/labour')
     await expect(page.getByText('Tap a cell to cycle')).toBeVisible()
-    await page.getByRole('button', { name: 'all P' }).first().click()
+    // Tapping a cell always changes it (cycles Present -> Half -> Absent), so this works on re-runs too.
+    await page.locator('.ant-table-row').first().locator('.ant-tag').first().click()
     await page.getByRole('button', { name: /Save attendance/ }).click()
     await expect(page.getByText(/Saved \d+ attendance mark/)).toBeVisible()
   })
@@ -176,7 +204,7 @@ test.describe('accountant', () => {
   test('sees no Void, profit reports or Admin, and is blocked by URL too', async ({ browser }) => {
     const ctx = await browser.newContext({ viewport: { width: 1366, height: 800 } })
     const page = await ctx.newPage()
-    await signIn(page, MUNSHI)
+    await signIn(page, MUNSHI, 'accountant')
     await expect(page.getByRole('menuitem', { name: 'Admin' })).toHaveCount(0)
     await page.goto('/challans')
     await expect(page.getByRole('heading', { name: 'Challans', exact: true })).toBeVisible()

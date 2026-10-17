@@ -128,3 +128,26 @@ def test_prod_requires_real_jwt_secret():
     with pytest.raises(ValidationError):
         Settings(env="prod", jwt_secret="change-me-in-env")
     assert get_settings().env == "test" and dt  # sanity: test settings are active
+
+
+def test_owner_and_munshi_must_use_their_own_login_page(client):
+    ok_admin = client.post("/api/v1/auth/login", json={"phone": "admin", "password": "admin12345", "portal": "admin"})
+    assert ok_admin.status_code == 200
+    ok_munshi = client.post(
+        "/api/v1/auth/login", json={"phone": "munshi", "password": "munshi12345", "portal": "accountant"}
+    )
+    assert ok_munshi.status_code == 200
+    wrong = client.post("/api/v1/auth/login", json={"phone": "munshi", "password": "munshi12345", "portal": "admin"})
+    assert wrong.status_code == 403 and wrong.json()["code"] == "WRONG_PORTAL"
+    assert "set-cookie" not in wrong.headers  # no session is issued on a mismatch
+    wrong2 = client.post(
+        "/api/v1/auth/login", json={"phone": "admin", "password": "admin12345", "portal": "accountant"}
+    )
+    assert wrong2.status_code == 403 and wrong2.json()["code"] == "WRONG_PORTAL"
+
+
+def test_wrong_portal_does_not_reveal_whether_a_user_exists(client):
+    bad = client.post("/api/v1/auth/login", json={"phone": "munshi", "password": "wrong-password", "portal": "admin"})
+    ghost = client.post("/api/v1/auth/login", json={"phone": "nobody", "password": "wrong-password", "portal": "admin"})
+    assert bad.status_code == ghost.status_code == 401
+    assert bad.json()["code"] == ghost.json()["code"] == "INVALID_CREDENTIALS"

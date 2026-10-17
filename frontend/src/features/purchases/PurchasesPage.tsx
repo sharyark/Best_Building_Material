@@ -2,7 +2,7 @@ import { DeleteOutlined, PlusOutlined } from '@ant-design/icons'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Button, Col, Input, Radio, Row, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useFieldArray, useForm, useWatch } from 'react-hook-form'
 import { useLookups } from '@/api/lookups'
 import { useSave } from '@/api/hooks'
@@ -14,6 +14,8 @@ import { DocPage, type DocFormProps } from '@/components/DocPage'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
 import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
+import { QuickAddParty } from '@/components/QuickAdd'
+import { usePermission } from '@/hooks/usePermission'
 import { formatDate, today } from '@/lib/date'
 import { formatQty, toNumber } from '@/lib/format'
 import { purchaseSchema, type PurchaseForm } from '@/lib/schemas'
@@ -21,6 +23,8 @@ import { purchaseSchema, type PurchaseForm } from '@/lib/schemas'
 function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
   const lookups = useLookups()
   const clientRef = useRef(crypto.randomUUID())
+  const canAdd = usePermission('masters.write')
+  const [adding, setAdding] = useState<string | null>(null)
   const { control, handleSubmit, setValue, getValues } = useForm<PurchaseForm>({
     resolver: zodResolver(purchaseSchema),
     defaultValues: doc
@@ -47,7 +51,7 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
     >
       <Row gutter={12}>
         <Col xs={24} sm={8}><Field control={control} name="date" label="Date" required>{(f) => <DateField id={f.id} value={f.value} onChange={f.onChange} />}</Field></Col>
-        <Col xs={24} sm={16}><Field control={control} name="supplier_id" label="Supplier" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.suppliers)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus />}</Field></Col>
+        <Col xs={24} sm={16}><Field control={control} name="supplier_id" label="Supplier" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.suppliers)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus addLabel="New supplier" onAdd={canAdd ? (n) => setAdding(n) : undefined} />}</Field></Col>
         <Col xs={24} sm={8}><Field control={control} name="supplier_slip_no" label="Supplier slip no.">{(f) => <Input {...f} value={f.value ?? ''} />}</Field></Col>
         <Col xs={24} sm={16}>
           <Field control={control} name="transport_by" label="Brought by">
@@ -76,6 +80,7 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
         </Row>
       ))}
       <Button type="dashed" icon={<PlusOutlined />} style={{ margin: '4px 0 16px' }} onClick={() => append({ material_id: undefined as unknown as number, qty: '', rate: '' })}>Add material</Button>
+      <QuickAddParty open={adding !== null} type="supplier" initialName={adding ?? ''} onClose={() => setAdding(null)} onCreated={(p) => setValue('supplier_id', p.id, { shouldValidate: true })} />
     </DocFormShell>
   )
 }

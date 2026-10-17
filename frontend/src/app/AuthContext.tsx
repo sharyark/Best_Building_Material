@@ -6,7 +6,7 @@ import type { Me, TokenOut } from '@/api/types'
 interface AuthState {
   user: Me | null
   loading: boolean
-  login: (phone: string, password: string) => Promise<void>
+  login: (phone: string, password: string, portal?: 'admin' | 'accountant') => Promise<void>
   logout: () => Promise<void>
   can: (perm: string) => boolean
 }
@@ -34,8 +34,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false))
   }, [qc])
 
-  const login = useCallback(async (phone: string, password: string) => {
-    const { data } = await api.post<TokenOut>('/auth/login', { phone, password })
+  const login = useCallback(async (phone: string, password: string, portal?: 'admin' | 'accountant') => {
+    const { data } = await api.post<TokenOut>('/auth/login', { phone, password, portal })
     tokenStore.set(data.access_token)
     setUser(data.user)
   }, [])

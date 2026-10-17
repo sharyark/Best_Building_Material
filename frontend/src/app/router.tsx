@@ -2,10 +2,12 @@ import { Result, Spin } from 'antd'
 import { lazy, Suspense, type ReactNode } from 'react'
 import { createBrowserRouter, Navigate, useLocation } from 'react-router-dom'
 import { RequirePerm } from '@/components/RequirePerm'
+import { lastPortal } from '@/features/auth/LoginPage'
 import { useAuth } from './AuthContext'
 import AppLayout from './Layout'
 
 const LoginPage = lazy(() => import('@/features/auth/LoginPage'))
+const LoginChooser = lazy(() => import('@/features/auth/LoginPage').then((m) => ({ default: m.LoginChooser })))
 const DashboardPage = lazy(() => import('@/features/dashboard/DashboardPage'))
 const ChallanPage = lazy(() => import('@/features/deliveries/ChallanPage'))
 const PurchasesPage = lazy(() => import('@/features/purchases/PurchasesPage'))
@@ -29,7 +31,9 @@ function RequireAuth({ children }: { children: ReactNode }) {
   const { user, loading } = useAuth()
   const location = useLocation()
   if (loading) return <Loading />
-  if (!user) return <Navigate to="/login" replace state={{ from: location.pathname + location.search }} />
+  // Send people back to the door they used last time; first-timers get the chooser.
+  const door = lastPortal()
+  if (!user) return <Navigate to={door ? `/${door}/login` : '/login'} replace state={{ from: location.pathname + location.search }} />
   return <>{children}</>
 }
 
@@ -40,7 +44,9 @@ const page = (perm: string, element: ReactNode) => (
 )
 
 export const router = createBrowserRouter([
-  { path: '/login', element: <Suspense fallback={<Loading />}><LoginPage /></Suspense> },
+  { path: '/login', element: <Suspense fallback={<Loading />}><LoginChooser /></Suspense> },
+  { path: '/admin/login', element: <Suspense fallback={<Loading />}><LoginPage portal="admin" /></Suspense> },
+  { path: '/accountant/login', element: <Suspense fallback={<Loading />}><LoginPage portal="accountant" /></Suspense> },
   {
     path: '/',
     element: <RequireAuth><AppLayout /></RequireAuth>,

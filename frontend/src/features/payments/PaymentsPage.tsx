@@ -1,7 +1,7 @@
 import { zodResolver } from '@hookform/resolvers/zod'
 import { Col, Input, Radio, Row, Select, Tag } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
-import { useRef } from 'react'
+import { useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
 import { useSave } from '@/api/hooks'
 import { useLookups } from '@/api/lookups'
@@ -13,6 +13,8 @@ import { DocPage, type DocFormProps } from '@/components/DocPage'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
 import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
+import { QuickAddParty } from '@/components/QuickAdd'
+import { usePermission } from '@/hooks/usePermission'
 import { formatDate, today } from '@/lib/date'
 import { paymentSchema, type PaymentForm } from '@/lib/schemas'
 
@@ -21,6 +23,8 @@ type Preset = { direction: 'in' | 'out' }
 function PaymentFormView({ doc, preset, onDone }: DocFormProps<Payment, Preset>) {
   const lookups = useLookups()
   const clientRef = useRef(crypto.randomUUID())
+  const canAdd = usePermission('masters.write')
+  const [adding, setAdding] = useState<string | null>(null)
   const direction = doc?.direction ?? preset?.direction ?? 'in'
   const { control, handleSubmit, setValue } = useForm<PaymentForm>({
     resolver: zodResolver(paymentSchema),
@@ -59,7 +63,7 @@ function PaymentFormView({ doc, preset, onDone }: DocFormProps<Payment, Preset>)
           </Field>
         </Col>
         {counterparty === 'party' ? (
-          <Col xs={24}><Field control={control} name="party_id" label={direction === 'in' ? 'Customer' : 'Supplier'} required>{(f) => <EntitySelect id={f.id} options={optionsOf(partyOptions)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus placeholder="Type name" />}</Field></Col>
+          <Col xs={24}><Field control={control} name="party_id" label={direction === 'in' ? 'Customer' : 'Supplier'} required>{(f) => <EntitySelect id={f.id} options={optionsOf(partyOptions)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus placeholder="Type name" addLabel={direction === 'in' ? 'New customer' : 'New supplier'} onAdd={canAdd ? (n) => setAdding(n) : undefined} />}</Field></Col>
         ) : (
           <>
             <Col xs={24} sm={14}><Field control={control} name="staff_id" label="Staff member" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.staff)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus />}</Field></Col>
@@ -76,6 +80,7 @@ function PaymentFormView({ doc, preset, onDone }: DocFormProps<Payment, Preset>)
         <Col xs={12}><Field control={control} name="ref_no" label="Cheque / reference no.">{(f) => <Input {...f} value={f.value ?? ''} onChange={(e) => { f.onChange(e.target.value); if (e.target.value && !f.value) setValue('mode', 'bank') }} />}</Field></Col>
         <Col xs={24}><Field control={control} name="notes" label="Notes">{(f) => <Input {...f} value={f.value ?? ''} />}</Field></Col>
       </Row>
+      <QuickAddParty open={adding !== null} type={direction === 'in' ? 'customer' : 'supplier'} initialName={adding ?? ''} onClose={() => setAdding(null)} onCreated={(p) => setValue('party_id', p.id, { shouldValidate: true })} />
     </DocFormShell>
   )
 }
