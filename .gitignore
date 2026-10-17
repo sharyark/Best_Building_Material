@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+.ruff_cache/
+*.egg-info/
+backend/*.db
+backend/.env
+
+# Node
+node_modules/
+frontend/dist/
+frontend/.env
+*.tsbuildinfo
+coverage/
+
+# Secrets & local data (secrets live in .env on the server, never in git)
+.env
+!.env.example
+backups/
+*.sqlite
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+
+frontend/test-results/
+frontend/playwright-report/

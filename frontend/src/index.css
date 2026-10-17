@@ -1,0 +1,11 @@
+body { margin: 0; background: #f5f7fa; }
+.row-void td { color: #8c8c8c !important; text-decoration: line-through; background: #fafafa !important; }
+.row-void td:last-child, .row-void td:nth-last-child(2) { text-decoration: none; }
+.ant-table-cell { white-space: nowrap; }
+@media (max-width: 575px) {
+  .ant-card-body { padding: 12px !important; }
+  .ant-modal { max-width: calc(100vw - 16px) !important; margin: 8px auto !important; }
+}
+@media print {
+  .ant-layout-sider, .ant-layout-header { display: none !important; }
+}

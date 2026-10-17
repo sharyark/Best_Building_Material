@@ -1,0 +1,91 @@
+name: CI
+
+on:
+  push:
+    branches: [main, staging]
+  pull_request:
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17
+        env: { POSTGRES_USER: hisaab, POSTGRES_PASSWORD: hisaab, POSTGRES_DB: hisaab_test }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U hisaab" --health-interval 5s --health-timeout 5s --health-retries 10
+    defaults:
+      run:
+        working-directory: backend
+    env:
+      TEST_DATABASE_URL: postgresql+psycopg://hisaab:hisaab@localhost:5432/hisaab_test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: sudo apt-get update && sudo apt-get install -y libpango-1.0-0 libpangoft2-1.0-0 libharfbuzz0b fonts-dejavu-core
+      - run: pip install -e ".[dev]"
+      - run: ruff check .
+      - run: ruff format --check .
+      - run: pytest -q
+      - name: Migrations apply cleanly and match the models
+        env:
+          DATABASE_URL: postgresql+psycopg://hisaab:hisaab@localhost:5432/hisaab_test
+        run: |
+          python - <<'PY'
+          from sqlalchemy import create_engine, text
+          e = create_engine("${{ env.DATABASE_URL }}")
+          with e.begin() as c:
+              c.execute(text("DROP SCHEMA public CASCADE")); c.execute(text("CREATE SCHEMA public"))
+          PY
+          alembic upgrade head
+          alembic check
+
+  frontend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: frontend
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm, cache-dependency-path: frontend/package-lock.json }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  images:
+    runs-on: ubuntu-latest
+    needs: [backend, frontend]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build production images
+        run: |
+          cp .env.example .env
+          sed -i 's/^POSTGRES_PASSWORD=.*/POSTGRES_PASSWORD=ci/; s/^POSTGRES_ADMIN_PASSWORD=.*/POSTGRES_ADMIN_PASSWORD=ci-admin/; s/^JWT_SECRET=.*/JWT_SECRET=ci-secret-ci-secret-ci-secret-1234/; s/^BOOTSTRAP_ADMIN_PHONE=.*/BOOTSTRAP_ADMIN_PHONE=admin/; s/^BOOTSTRAP_ADMIN_PASSWORD=.*/BOOTSTRAP_ADMIN_PASSWORD=ci-password-123/' .env
+          docker compose build
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [images]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')
+    environment: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+    steps:
+      - name: Deploy over SSH
+        env:
+          SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          HOST: ${{ secrets.DEPLOY_HOST }}
+          USER: ${{ secrets.DEPLOY_USER }}
+          TARGET: ${{ github.ref == 'refs/heads/main' && 'production' || 'staging' }}
+        run: |
+          if [ -z "$SSH_KEY" ] || [ -z "$HOST" ]; then echo "Deploy secrets not configured; skipping."; exit 0; fi
+          install -m 600 /dev/null key && printf '%s\n' "$SSH_KEY" > key
+          if [ "$TARGET" = production ]; then
+            CMD='cd /srv/hisaab && git pull --ff-only && docker compose up -d --build'
+          else
+            CMD='cd /srv/hisaab-staging && git pull --ff-only && docker compose -p hisaab-staging -f docker-compose.yml -f docker-compose.staging.yml --env-file .env.staging up -d --build'
+          fi
+          ssh -i key -o StrictHostKeyChecking=accept-new "$USER@$HOST" "$CMD"

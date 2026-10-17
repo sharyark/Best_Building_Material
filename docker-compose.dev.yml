@@ -1,0 +1,10 @@
+# Just the database for local development; run the API and Vite on your machine.
+#   docker compose -f docker-compose.dev.yml up -d
+services:
+  db:
+    image: postgres:17
+    environment: { POSTGRES_USER: hisaab, POSTGRES_PASSWORD: hisaab, POSTGRES_DB: hisaab }
+    ports: ["127.0.0.1:5432:5432"]
+    volumes: [devdata:/var/lib/postgresql/data]
+volumes:
+  devdata:

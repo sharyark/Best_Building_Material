@@ -1,0 +1,93 @@
+# Production stack on one VPS: caddy (TLS + static + /api proxy), api (FastAPI), db (PostgreSQL 17), backup.
+# Usage: cp .env.example .env && edit it, then `docker compose up -d --build`.
+name: ${COMPOSE_PROJECT_NAME:-hisaab}
+
+services:
+  db:
+    image: postgres:17
+    restart: unless-stopped
+    environment:
+      # Superuser: admin work only (restore tests). The app uses the restricted role created by the init script.
+      POSTGRES_USER: pgadmin
+      POSTGRES_PASSWORD: ${POSTGRES_ADMIN_PASSWORD:?set POSTGRES_ADMIN_PASSWORD in .env}
+      POSTGRES_DB: postgres
+      APP_DB_USER: ${POSTGRES_USER:-hisaab}
+      APP_DB_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      APP_DB_NAME: ${POSTGRES_DB:-hisaab}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./deploy/db/init-app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pgadmin -d postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+    # No `ports:`: Postgres is reachable only from other containers, never from the internet.
+
+  api:
+    build: ./backend
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ENV: prod
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-hisaab}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-hisaab}
+      JWT_SECRET: ${JWT_SECRET:?set JWT_SECRET in .env}
+      COOKIE_SECURE: ${COOKIE_SECURE:-true}
+      CORS_ORIGINS: '["https://${DOMAIN:-localhost}"]'
+      FIN_YEAR_START_MONTH: ${FIN_YEAR_START_MONTH:-4}
+      CURRENCY_SYMBOL: ${CURRENCY_SYMBOL:-Rs}
+      BUSINESS_NAME: ${BUSINESS_NAME:-Construction Material Supply}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-Owner}
+      BOOTSTRAP_ADMIN_PHONE: ${BOOTSTRAP_ADMIN_PHONE:?set BOOTSTRAP_ADMIN_PHONE in .env}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:?set BOOTSTRAP_ADMIN_PASSWORD in .env}
+
+  caddy:
+    build:
+      context: .
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    environment:
+      DOMAIN: ${DOMAIN:-localhost}
+    ports:
+      - "${HTTP_PORT:-80}:80"
+      - "${HTTPS_PORT:-443}:443"
+      - "${HTTPS_PORT:-443}:443/udp"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+  backup:
+    build: ./deploy/backup
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGHOST: db
+      # Dumps run as the restricted app role; only the monthly restore test uses the admin login.
+      PGUSER: ${POSTGRES_USER:-hisaab}
+      PGPASSWORD: ${POSTGRES_PASSWORD}
+      PGDATABASE: ${POSTGRES_DB:-hisaab}
+      ADMIN_PGUSER: pgadmin
+      ADMIN_PGPASSWORD: ${POSTGRES_ADMIN_PASSWORD}
+      KEEP_DAILY: ${BACKUP_KEEP_DAILY:-30}
+      KEEP_MONTHLY: ${BACKUP_KEEP_MONTHLY:-12}
+      # Off-site copy (Backblaze B2 / S3 / any rclone remote). Leave empty to keep backups on the VPS only.
+      OFFSITE_REMOTE: ${BACKUP_OFFSITE_REMOTE:-}
+      RCLONE_CONFIG_OFFSITE_TYPE: ${RCLONE_TYPE:-s3}
+      RCLONE_CONFIG_OFFSITE_PROVIDER: ${RCLONE_PROVIDER:-}
+      RCLONE_CONFIG_OFFSITE_ENDPOINT: ${RCLONE_ENDPOINT:-}
+      RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID: ${RCLONE_ACCESS_KEY_ID:-}
+      RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY: ${RCLONE_SECRET_ACCESS_KEY:-}
+    volumes:
+      - backups:/backups
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:
+  backups:

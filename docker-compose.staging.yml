@@ -1,0 +1,17 @@
+# Separate staging stack on the same VPS. Own database, own volumes, own ports, plain HTTP behind the firewall.
+#   docker compose -p hisaab-staging -f docker-compose.yml -f docker-compose.staging.yml --env-file .env.staging up -d --build
+# Reach it at http://<vps-ip>:8080 (or through an SSH tunnel).
+services:
+  caddy:
+    ports: !override
+      - "${HTTP_PORT:-8080}:80"
+    environment:
+      DOMAIN: "http://:80"
+  api:
+    environment:
+      COOKIE_SECURE: "false"
+      CORS_ORIGINS: '["http://localhost:8080"]'
+  backup:
+    environment:
+      KEEP_DAILY: 7
+      KEEP_MONTHLY: 1
