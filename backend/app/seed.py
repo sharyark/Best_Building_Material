@@ -10,6 +10,7 @@ import argparse
 import datetime as dt
 import random
 from decimal import Decimal
+from pathlib import Path
 
 from sqlalchemy import func, select, text
 
@@ -88,8 +89,16 @@ def run(db) -> None:
     bank = masters.create_money_account(db, MoneyAccountIn(name="Bank - HBL", kind="bank"))
     materials = {
         name: masters.create_material(
-            db, MaterialIn(name=name, unit=unit, default_sale_rate=sale, default_purchase_rate=buy)
-        )
+            db,
+            MaterialIn(
+                name=name,
+                unit=unit,
+                default_sale_rate=sale,
+                default_purchase_rate=buy,
+                # loose material: one dumper ~ 3 trolleys, one loader bucket ~ a quarter trolley
+                **({"dumper_qty": Decimal(3), "bucket_qty": Decimal("0.25")} if unit == "trolley" else {}),
+            ),
+        )  # fmt: skip
         for name, unit, sale, buy in MATERIALS
     }
     customers, sites = [], {}
@@ -161,6 +170,13 @@ def run(db) -> None:
             lines=[PurchaseLineIn(material_id=m.id, qty=Decimal(qty), rate=(Decimal(m.default_purchase_rate) * Decimal(str(round(rnd.uniform(0.96, 1.06), 3)))).quantize(Decimal('0.01')))],
         ))  # fmt: skip
 
+    # One customer pays every challan on the spot; another works off an advance paid up front.
+    cash_customer, advance_customer, slow_payer = customers[6], customers[3], customers[4]
+    payments.create(db, PaymentIn(
+        date=cutover + dt.timedelta(days=1), direction="in", party_id=advance_customer.id, mode="bank",
+        money_account_id=bank.id, amount=Decimal(200000), notes="Advance for the season",
+    ))  # fmt: skip
+
     month_ends: set[dt.date] = set()
     for offset in range(1, DAYS + 1):
         day = cutover + dt.timedelta(days=offset)
@@ -177,15 +193,45 @@ def run(db) -> None:
             qty = Decimal(rnd.choice([1, 1, 1, 2])) if m.unit == "trolley" else Decimal(rnd.choice([20, 40, 60] if m.unit == "bag" else [200, 400, 500]))  # fmt: skip
             veh = rnd.choice(fleet)
             drv = next(d for d in drivers if d.default_vehicle_id == veh.id)
-            if db.get(StockItem, m.id).qty_on_hand < qty:
-                restock(day, name, 40 if m.unit == "trolley" else 400)
-            deliveries.create(db, DeliveryIn(
+            loose = m.unit == "trolley"
+            load_unit = "dumper" if loose and veh.type == "dumper" else None
+            half = loose and rnd.random() < 0.15
+            if load_unit:
+                qty = Decimal(1)
+            # some sand trolleys also carry cement bags on top
+            extra = materials["Cement"] if name == "Rait (Sand)" and not load_unit and rnd.random() < 0.2 else None
+            extra_qty = Decimal(10) if extra else None
+            # a half trolley is often shared: half one material, half another
+            if half and not load_unit and rnd.random() < 0.5:
+                extra = materials[rnd.choice([n for n in ("Rait (Sand)", "Bajri (Gravel)", "Crush") if n != name])]
+                extra_qty = qty * Decimal("0.5")
+            stock_qty = qty * (m.dumper_qty if load_unit else 1)
+            if db.get(StockItem, m.id).qty_on_hand < stock_qty:
+                restock(day, name, 40 if loose else 400)
+            if extra and db.get(StockItem, extra.id).qty_on_hand < extra_qty:
+                restock(day, extra.name, 40 if extra.unit == "trolley" else 400)
+            d = deliveries.create(db, DeliveryIn(
                 date=day, customer_id=cust.id, site_id=rnd.choice(sites[cust.id]).id, material_id=m.id, qty=qty,
+                load_unit=load_unit, load_size="half" if half else "full",
                 freight_amount=Decimal(rnd.choice([0, 500, 800, 1000, 1500])), vehicle_id=veh.id, driver_id=drv.id,
-            ))  # fmt: skip
+                extra_material_id=extra.id if extra else None, extra_qty=extra_qty,
+            ))[0]  # fmt: skip
+            if cust is cash_customer:  # pays on the spot, as the challan screen's "Paid in full" does
+                receipt, _ = payments.create(db, PaymentIn(
+                    date=day, direction="in", party_id=cust.id, mode="cash", money_account_id=cash.id,
+                    amount=d.sale_amount + d.freight_amount + d.extra_amount, notes=f"Paid with challan {d.challan_no}",
+                ))  # fmt: skip
+                d.receipt_id = receipt.id
+            elif cust is advance_customer and balance_of(db, cust.account_id) > -30000 and offset < DAYS - 4:
+                # tops up whenever the advance runs low, except the last few days so the demo shows a low advance
+                payments.create(db, PaymentIn(
+                    date=day, direction="in", party_id=cust.id, mode="bank", money_account_id=bank.id,
+                    amount=Decimal(150000), notes="Advance top-up",
+                ))  # fmt: skip
         if rnd.random() < 0.35:
             rentals.create(db, RentalIn(
-                date=day, customer_id=rnd.choice(customers).id, vehicle_id=(ld := rnd.choice(loaders)).id,
+                date=day, customer_id=rnd.choice([c for c in customers if c is not cash_customer]).id,
+                vehicle_id=(ld := rnd.choice(loaders)).id,
                 operator_id=next(o for o in operators if o.default_vehicle_id == ld.id).id, basis="hour",
                 qty=Decimal(rnd.choice([3, 4, 6, 8])), rate=Decimal(1200),
             ))  # fmt: skip
@@ -210,6 +256,8 @@ def run(db) -> None:
         ])  # fmt: skip
         if day.weekday() == 4:  # Friday: customers pay most of what they owe, we pay suppliers
             for cust in customers:
+                if cust in (cash_customer, advance_customer) or (cust is slow_payer and offset > DAYS - 21):
+                    continue
                 owed = balance_of(db, cust.account_id)
                 if owed < 5000 or rnd.random() < 0.15:
                     continue
@@ -248,6 +296,15 @@ def run(db) -> None:
         if (day + dt.timedelta(days=1)).day == 1:
             month_ends.add(day)
         db.commit()
+
+    # leave the advance customer with a little advance, so the reminders have something to show
+    owed = balance_of(db, advance_customer.account_id)
+    if owed > -3000:
+        payments.create(db, PaymentIn(
+            date=today, direction="in", party_id=advance_customer.id, mode="cash", money_account_id=cash.id,
+            amount=owed + 3000, notes="Advance top-up",
+        ))  # fmt: skip
+    db.commit()
 
     # ---- settlements, a bill, a count -----------------------------------------------------------
     for end in sorted(month_ends):
@@ -289,6 +346,11 @@ def main() -> None:
         else:
             Base.metadata.drop_all(engine)
         Base.metadata.create_all(engine)
+        # Tables now match the models, so mark the DB as migrated; otherwise the next `alembic upgrade` fails.
+        from alembic import command
+        from alembic.config import Config
+
+        command.stamp(Config(str(Path(__file__).resolve().parents[1] / "alembic.ini")), "head")
     elif get_settings().auto_create_tables:
         Base.metadata.create_all(engine)
     with SessionLocal() as db:

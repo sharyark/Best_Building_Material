@@ -24,11 +24,25 @@ class Delivery(Base, TimestampMixin, TxnMixin):
     sale_rate: Mapped[Decimal] = mapped_column(Money)
     sale_amount: Mapped[Decimal] = mapped_column(Money)
     freight_amount: Mapped[Decimal] = mapped_column(Money, default=0)
+    # Sold by the dumper/loader bucket instead of the material's own unit; `qty`/`unit`/`sale_rate` are then
+    # in loads, and `stock_qty` is what left the yard in the material's unit.
+    load_unit: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    load_size: Mapped[str] = mapped_column(String(5), default="full", server_default="full")
+    stock_qty: Mapped[Decimal] = mapped_column(Qty)
     cost_rate: Mapped[Decimal] = mapped_column(Rate, default=0)  # avg cost snapshot
     cost_amount: Mapped[Decimal] = mapped_column(Money, default=0)
+    # A second material on the same trip, e.g. cement bags on top of a sand trolley.
+    extra_material_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("materials.id"), nullable=True)
+    extra_qty: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
+    extra_unit: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    extra_rate: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    extra_amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    extra_cost_amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     vehicle_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("vehicles.id"), nullable=True)
     driver_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("staff.id"), nullable=True)
     invoice_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("invoices.id"), nullable=True)
+    # Money the customer paid on the spot, entered with the challan as a normal receipt.
+    receipt_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("payments.id"), nullable=True)
     journal_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("journal_entries.id"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 

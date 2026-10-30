@@ -8,6 +8,7 @@ import type { Material, MoneyAccount, Party, RateCard, Site, Staff, Vehicle } fr
 import { MoneyInput } from '@/components/DecimalInput'
 import { DateField } from '@/components/DateField'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
+import { formatQty } from '@/lib/format'
 import { Money } from '@/components/Money'
 import { PageHeader } from '@/components/PageHeader'
 import { usePermission } from '@/hooks/usePermission'
@@ -76,6 +77,8 @@ function Materials() {
     { title: 'Unit', dataIndex: 'unit' },
     { title: 'Default sale rate', dataIndex: 'default_sale_rate', align: 'right', render: (v) => <Money value={v} /> },
     { title: 'Default purchase rate', dataIndex: 'default_purchase_rate', align: 'right', render: (v) => <Money value={v} /> },
+    { title: '1 dumper', render: (_, m) => (m.dumper_qty ? `${formatQty(m.dumper_qty)} ${m.unit}` : '') },
+    { title: '1 bucket', render: (_, m) => (m.bucket_qty ? `${formatQty(m.bucket_qty)} ${m.unit}` : '') },
   ]
   const fields: FieldSpec[] = [
     { name: 'name', label: 'Name', kind: 'text', required: true },
@@ -83,6 +86,10 @@ function Materials() {
     { name: 'default_sale_rate', label: 'Default sale rate', kind: 'money', required: true },
     { name: 'default_purchase_rate', label: 'Default purchase rate', kind: 'money', required: true },
     { name: 'hsn_code', label: 'HSN code (tax)', kind: 'text' },
+    { name: 'dumper_qty', label: 'One full dumper holds (in this unit)', kind: 'qty', hint: 'For sand, crush, gravel: e.g. 3 trolleys. Leave empty if not sold by dumper.' },
+    { name: 'dumper_rate', label: 'Sale rate per full dumper', kind: 'money', hint: 'Leave empty to use the unit rate x dumper size.' },
+    { name: 'bucket_qty', label: 'One loader bucket holds (in this unit)', kind: 'qty', hint: 'e.g. 0.25 trolley. Leave empty if not sold by bucket.' },
+    { name: 'bucket_rate', label: 'Sale rate per bucket', kind: 'money', hint: 'Leave empty to use the unit rate x bucket size.' },
   ]
   return <CrudTable<Material & Record<string, unknown>> endpoint="/masters/materials" entityName="Material" columns={columns as never} fields={fields} defaults={{ unit: 'trolley', default_sale_rate: '0', default_purchase_rate: '0' }} />
 }

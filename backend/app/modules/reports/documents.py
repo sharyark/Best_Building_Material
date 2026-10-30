@@ -59,6 +59,7 @@ def challan_pdf(db: Session, delivery_id: int) -> Response:
     d = get_or_404(db, Delivery, delivery_id, "Challan")
     customer = db.get(Party, d.customer_id)
     material = db.get(Material, d.material_id)
+    extra = db.get(Material, d.extra_material_id) if d.extra_material_id else None
     site = db.get(Site, d.site_id) if d.site_id else None
     vehicle = db.get(Vehicle, d.vehicle_id) if d.vehicle_id else None
     driver = db.get(Staff, d.driver_id) if d.driver_id else None
@@ -79,14 +80,20 @@ def challan_pdf(db: Session, delivery_id: int) -> Response:
             ]
         )  # fmt: skip
         + "<table class='items'><tr><th>Material</th><th class='r'>Qty</th><th class='r'>Rate</th><th class='r'>Amount</th></tr>"
-        f"<tr><td>{html.escape(material.name)}</td><td class='r'>{fmt_qty(d.qty)} {d.unit}</td>"
+        f"<tr><td>{html.escape(material.name)}{' (half load)' if d.load_size == 'half' else ''}</td><td class='r'>{fmt_qty(d.qty)} {d.unit}</td>"
         f"<td class='r'>{fmt_money(d.sale_rate)}</td><td class='r'>{fmt_money(d.sale_amount)}</td></tr>"
+        + (
+            f"<tr><td>{html.escape(extra.name)}</td><td class='r'>{fmt_qty(d.extra_qty)} {d.extra_unit}</td>"
+            f"<td class='r'>{fmt_money(d.extra_rate)}</td><td class='r'>{fmt_money(d.extra_amount)}</td></tr>"
+            if extra
+            else ""
+        )
         + (
             f"<tr><td>Freight (bhara)</td><td></td><td></td><td class='r'>{fmt_money(d.freight_amount)}</td></tr>"
             if d.freight_amount
             else ""
         )
-        + f"<tr class='tot'><td colspan='3'>Total</td><td class='r'>{fmt_money(d.sale_amount + d.freight_amount)}</td></tr></table>"
+        + f"<tr class='tot'><td colspan='3'>Total</td><td class='r'>{fmt_money(d.sale_amount + d.freight_amount + d.extra_amount)}</td></tr></table>"
     )
     return _pdf(_page("Delivery challan", d.challan_no, body), f"{d.challan_no.replace('/', '_')}.pdf")
 

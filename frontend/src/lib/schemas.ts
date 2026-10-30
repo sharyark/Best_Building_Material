@@ -33,6 +33,26 @@ export const deliverySchema = z.object({
   vehicle_id: optionalId,
   driver_id: optionalId,
   notes: z.string().max(500).optional().or(z.literal('')),
+  load_size: z.enum(['full', 'half']).default('full'),
+  with_cement: z.boolean().default(false),
+  /** Half trolley split between two materials: the material of the other half. */
+  other_half_id: optionalId,
+  extra_qty: z.string().optional().or(z.literal('')),
+  extra_rate: z.string().optional().or(z.literal('')),
+  /** How the customer pays for this challan: on the khata, or on the spot in full / in part. */
+  pay: z.enum(['credit', 'full', 'part']).default('credit'),
+  paid_amount: optionalMoney,
+  money_account_id: optionalId,
+}).superRefine((v, ctx) => {
+  if (v.pay !== 'credit' && !v.money_account_id) ctx.addIssue({ code: 'custom', path: ['money_account_id'], message: 'Pick cash or bank' })
+  if (v.pay === 'part' && !(Number(v.paid_amount) > 0)) ctx.addIssue({ code: 'custom', path: ['paid_amount'], message: 'Enter the amount received' })
+  if (v.with_cement) {
+    if (!(Number(v.extra_qty) > 0)) ctx.addIssue({ code: 'custom', path: ['extra_qty'], message: 'Enter the number of bags' })
+    if (!(Number(v.extra_rate) > 0)) ctx.addIssue({ code: 'custom', path: ['extra_rate'], message: 'Enter the cement rate' })
+  } else if (v.other_half_id) {
+    if (v.other_half_id === v.material_id) ctx.addIssue({ code: 'custom', path: ['other_half_id'], message: 'Pick a different material for the other half' })
+    if (!(Number(v.extra_rate) > 0)) ctx.addIssue({ code: 'custom', path: ['extra_rate'], message: 'Enter the rate' })
+  }
 })
 export type DeliveryForm = z.infer<typeof deliverySchema>
 

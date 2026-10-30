@@ -44,6 +44,12 @@ class Material(Base, TimestampMixin):
     default_sale_rate: Mapped[Decimal] = mapped_column(Money, default=0)
     default_purchase_rate: Mapped[Decimal] = mapped_column(Money, default=0)
     hsn_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Loose material sold by the dumper or loader bucket: how much stock (in `unit`) one full load holds,
+    # and the sale rate for one full load. Unset means the material can't be sold that way.
+    dumper_qty: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
+    dumper_rate: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
+    bucket_qty: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
+    bucket_rate: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
 

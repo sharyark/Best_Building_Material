@@ -1,5 +1,5 @@
 import { EditOutlined } from '@ant-design/icons'
-import { Button, Card, Modal, Select, Space, Table } from 'antd'
+import { Button, Card, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useState } from 'react'
 import { usePage } from '@/api/hooks'
@@ -35,10 +35,21 @@ export default function ChallanPage() {
     { title: 'Date', dataIndex: 'date', render: formatDate },
     { title: 'Customer', dataIndex: 'customer_id', render: (id: number) => lookups.partyById.get(id)?.name },
     { title: 'Site', dataIndex: 'site_id', render: (id: number | null) => (id ? lookups.siteById.get(id)?.name : '') },
-    { title: 'Material', dataIndex: 'material_id', render: (id: number) => lookups.materialById.get(id)?.name },
+    {
+      title: 'Material',
+      render: (_, d) => (
+        <>
+          {lookups.materialById.get(d.material_id)?.name}
+          {d.load_size === 'half' && <Tag style={{ marginLeft: 6 }}>Half</Tag>}
+          {d.extra_material_id && (
+            <Typography.Text type="secondary"> + {formatQty(d.extra_qty)} {d.extra_unit} {lookups.materialById.get(d.extra_material_id)?.name}</Typography.Text>
+          )}
+        </>
+      ),
+    },
     { title: 'Qty', align: 'right', render: (_, d) => `${formatQty(d.qty)} ${d.unit}` },
     { title: 'Rate', dataIndex: 'sale_rate', align: 'right', render: (v) => <Money value={v} /> },
-    { title: 'Amount', align: 'right', render: (_, d) => <Money value={Number(d.sale_amount) + Number(d.freight_amount)} bold /> },
+    { title: 'Amount', align: 'right', render: (_, d) => <Money value={Number(d.sale_amount) + Number(d.freight_amount) + Number(d.extra_amount)} bold /> },
     { title: 'Vehicle', dataIndex: 'vehicle_id', render: (id: number | null) => (id ? lookups.vehicleById.get(id)?.name : '') },
     { title: 'Status', render: (_, d) => <StatusTag status={d.status} reason={d.void_reason} /> },
     {

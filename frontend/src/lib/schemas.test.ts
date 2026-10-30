@@ -27,6 +27,12 @@ describe('deliverySchema', () => {
     expect(deliverySchema.safeParse({ ...delivery, qty: '1.2345' }).success).toBe(false)
     expect(deliverySchema.safeParse({ ...delivery, qty: '1.234' }).success).toBe(true)
   })
+  it('needs bags and a rate when cement rides along', () => {
+    const r = deliverySchema.safeParse({ ...delivery, with_cement: true, extra_qty: '', extra_rate: '' })
+    expect(r.success).toBe(false)
+    if (!r.success) expect(r.error.issues.map((i) => i.path[0])).toEqual(expect.arrayContaining(['extra_qty', 'extra_rate']))
+    expect(deliverySchema.safeParse({ ...delivery, with_cement: true, extra_qty: '20', extra_rate: '1500' }).success).toBe(true)
+  })
 })
 
 describe('purchaseSchema', () => {

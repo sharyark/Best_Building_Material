@@ -1,7 +1,7 @@
 import {
-  BankOutlined, CarOutlined, DatabaseOutlined, DollarOutlined, RiseOutlined, TeamOutlined, WalletOutlined, FallOutlined, LineChartOutlined,
+  BankOutlined, BellOutlined, CarOutlined, DatabaseOutlined, DollarOutlined, RiseOutlined, TeamOutlined, WalletOutlined, FallOutlined, LineChartOutlined,
 } from '@ant-design/icons'
-import { Alert, Card, Col, Row, Table, Typography } from 'antd'
+import { Alert, Card, Col, Row, Table, Tag, Typography } from 'antd'
 import { Link } from 'react-router-dom'
 import { apiError } from '@/api/client'
 import { useGet } from '@/api/hooks'
@@ -33,6 +33,27 @@ export default function DashboardPage() {
         <Col xs={24} sm={12} lg={8}><StatCard title="Payable: we owe suppliers" value={cur(d?.total_payable)} icon={<FallOutlined />} tone="amber" /></Col>
         <Col xs={24} sm={12} lg={8}><StatCard title="Staff wages payable" value={cur(d?.staff_payable)} icon={<TeamOutlined />} tone="slate" to="/labour" /></Col>
       </Row>
+      {d && (d.advance_low.length > 0 || d.old_udhaar.length > 0) && (
+        <Card size="small" title={<><BellOutlined style={{ color: '#d46b08', marginRight: 8 }} />Payment reminders</>} style={{ ...cardStyle, marginTop: 12 }}>
+          <Row gutter={[16, 8]}>
+            <Col xs={24} lg={12}>
+              <Typography.Text strong>Advance running low</Typography.Text>
+              <Typography.Text type="secondary"> (under <Money value={d.advance_low_threshold} />)</Typography.Text>
+              <Table size="small" rowKey="party_id" pagination={false} dataSource={d.advance_low} locale={{ emptyText: 'No advance is running low' }}
+                columns={[{ title: 'Customer', render: (_, r) => <Link to={`/reports/khata?party=${r.party_id}`}>{r.name}</Link> }, { title: 'Advance left', dataIndex: 'advance', align: 'right', render: (v) => <Money value={v} bold /> }]} />
+            </Col>
+            <Col xs={24} lg={12}>
+              <Typography.Text strong>Udhaar unpaid for over {d.credit_overdue_days} days</Typography.Text>
+              <Table size="small" rowKey="party_id" pagination={false} dataSource={d.old_udhaar} locale={{ emptyText: 'No old udhaar' }}
+                columns={[
+                  { title: 'Customer', render: (_, r) => <Link to={`/reports/khata?party=${r.party_id}`}>{r.name}</Link> },
+                  { title: 'Days', dataIndex: 'days', align: 'right', render: (v: number) => <Tag color={v > 30 ? 'red' : 'orange'}>{v} days</Tag> },
+                  { title: 'Owes', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} bold /> },
+                ]} />
+            </Col>
+          </Row>
+        </Card>
+      )}
       <Row gutter={[12, 12]} style={{ marginTop: 12 }}>
         <Col xs={24} lg={12}>
           <Card size="small" title="Today's trips by material" loading={isLoading} style={cardStyle}>
