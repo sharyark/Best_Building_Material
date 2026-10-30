@@ -61,6 +61,11 @@ export interface Material {
   default_sale_rate: Decimal
   default_purchase_rate: Decimal
   hsn_code: string | null
+  /** Stock (in `unit`) one full dumper / loader bucket holds; null = not sold that way. */
+  dumper_qty: Decimal | null
+  dumper_rate: Decimal | null
+  bucket_qty: Decimal | null
+  bucket_rate: Decimal | null
   is_active: boolean
 }
 export interface RateCard {
@@ -139,12 +144,24 @@ export interface Delivery extends DocBase {
   sale_rate: Decimal
   sale_amount: Decimal
   freight_amount: Decimal
+  load_unit: LoadUnit | null
+  load_size: LoadSize
+  stock_qty: Decimal
   cost_rate: Decimal
   cost_amount: Decimal
+  extra_material_id: number | null
+  extra_qty: Decimal | null
+  extra_unit: string | null
+  extra_rate: Decimal | null
+  extra_amount: Decimal
+  extra_cost_amount: Decimal
   vehicle_id: number | null
   driver_id: number | null
   invoice_id: number | null
+  receipt_id: number | null
 }
+export type LoadUnit = 'dumper' | 'bucket'
+export type LoadSize = 'full' | 'half'
 export interface Rental extends DocBase {
   rental_no: string
   date: string
@@ -300,6 +317,20 @@ export interface Dashboard {
   staff_advances: Decimal
   stock_value: Decimal
   top_debtors: { party_id: number; name: string; balance: Decimal }[]
+  advance_low: { party_id: number; name: string; advance: Decimal }[]
+  old_udhaar: { party_id: number; name: string; balance: Decimal; days: number }[]
+  advance_low_threshold: Decimal
+  credit_overdue_days: number
+}
+
+/** A customer's khata in one number: positive = owes us (udhaar), negative = advance with us. */
+export interface PartyBalance {
+  party_id: number
+  balance: Decimal
+  oldest_unpaid_date: string | null
+  days_unpaid: number | null
+  advance_low_threshold: Decimal
+  credit_overdue_days: number
 }
 
 export interface PeriodLock {

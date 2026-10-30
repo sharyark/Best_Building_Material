@@ -7,9 +7,10 @@ from decimal import Decimal
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from app.accounting.balances import account_balances
+from app.accounting.balances import account_balances, oldest_unpaid_dates
 from app.accounting.chart import Code
 from app.accounting.models import Account, JournalEntry, JournalLine
+from app.core.config import get_settings
 from app.core.db import ZERO
 from app.core.errors import NotFound
 from app.modules.deliveries.models import Delivery
@@ -407,19 +408,22 @@ def material_margin(db: Session, date_from: dt.date, date_to: dt.date) -> Report
             .group_by(PurchaseLine.material_id)
         )
     }
-    sold = {
-        mid: (q, sale, cost)
+    # Quantities in the material's own unit (stock_qty), so dumper/bucket loads add up with trolleys.
+    sold: dict[int, list[Decimal]] = {}
+    active = (Delivery.status == "active", Delivery.date >= date_from, Delivery.date <= date_to)
+    for cols in (
+        (Delivery.material_id, Delivery.stock_qty, Delivery.sale_amount, Delivery.cost_amount),
+        (Delivery.extra_material_id, Delivery.extra_qty, Delivery.extra_amount, Delivery.extra_cost_amount),
+    ):
+        mid_col, q_col, sale_col, cost_col = cols
         for mid, q, sale, cost in db.execute(
-            select(
-                Delivery.material_id,
-                func.sum(Delivery.qty),
-                func.sum(Delivery.sale_amount),
-                func.sum(Delivery.cost_amount),
-            )
-            .where(Delivery.status == "active", Delivery.date >= date_from, Delivery.date <= date_to)
-            .group_by(Delivery.material_id)
-        )
-    }
+            select(mid_col, func.sum(q_col), func.sum(sale_col), func.sum(cost_col))
+            .where(*active, mid_col.is_not(None))
+            .group_by(mid_col)
+        ):
+            acc = sold.setdefault(mid, [ZERO, ZERO, ZERO])
+            for i, v in enumerate((q, sale, cost)):
+                acc[i] += Decimal(v or 0)
     rows = []
     for m in db.scalars(select(Material).order_by(Material.name)):
         if m.id not in sold:
@@ -670,9 +674,9 @@ def dashboard(db: Session) -> dict:
     def sales_between(start: dt.date, end: dt.date) -> Decimal:
         return Decimal(
             db.scalar(
-                select(func.coalesce(func.sum(Delivery.sale_amount + Delivery.freight_amount), 0)).where(
-                    Delivery.status == "active", Delivery.date >= start, Delivery.date <= end
-                )
+                select(
+                    func.coalesce(func.sum(Delivery.sale_amount + Delivery.freight_amount + Delivery.extra_amount), 0)
+                ).where(Delivery.status == "active", Delivery.date >= start, Delivery.date <= end)
             )
         )
 
@@ -682,7 +686,7 @@ def dashboard(db: Session) -> dict:
     by_material = [
         {"material": name, "unit": unit, "trips": n, "qty": Decimal(q)}
         for name, unit, n, q in db.execute(
-            select(Material.name, Material.unit, func.count(), func.sum(Delivery.qty))
+            select(Material.name, Material.unit, func.count(), func.sum(Delivery.stock_qty))
             .join(Material, Material.id == Delivery.material_id)
             .where(Delivery.status == "active", Delivery.date == today)
             .group_by(Material.name, Material.unit)
@@ -690,6 +694,28 @@ def dashboard(db: Session) -> dict:
     ]
     top = sorted(((b, p) for p in parties if (b := party_bal.get(p.account_id, ZERO)) > 0), key=lambda t: -t[0])[:5]
     stock_value = Decimal(db.scalar(select(func.coalesce(func.sum(StockItem.value), 0))))
+
+    # Payment reminders: customers whose advance is nearly used up, and udhaar left unpaid too long.
+    settings = get_settings()
+    customers = [p for p in parties if p.type != "supplier" and p.account_id and p.is_active]
+    advance_low = sorted(
+        (
+            {"party_id": p.id, "name": p.name, "advance": str(-b)}
+            for p in customers
+            if -settings.advance_low_threshold < (b := party_bal.get(p.account_id, ZERO)) < 0
+        ),
+        key=lambda r: Decimal(r["advance"]),
+    )
+    owing = [p for p in customers if party_bal.get(p.account_id, ZERO) > 0]
+    oldest = oldest_unpaid_dates(db, [p.account_id for p in owing])
+    old_udhaar = sorted(
+        (
+            {"party_id": p.id, "name": p.name, "balance": str(party_bal[p.account_id]), "days": days}
+            for p in owing
+            if (d := oldest.get(p.account_id)) and (days := (today - d).days) > settings.credit_overdue_days
+        ),
+        key=lambda r: -r["days"],
+    )
     return {
         "date": today.isoformat(),
         "trips_today": trips_today,
@@ -704,4 +730,8 @@ def dashboard(db: Session) -> dict:
         "staff_advances": str(sum((b for b in staff_bal.values() if b > 0), ZERO)),
         "stock_value": str(stock_value),
         "top_debtors": [{"party_id": p.id, "name": p.name, "balance": str(b)} for b, p in top],
+        "advance_low": advance_low[:8],
+        "old_udhaar": old_udhaar[:8],
+        "advance_low_threshold": str(settings.advance_low_threshold),
+        "credit_overdue_days": settings.credit_overdue_days,
     }

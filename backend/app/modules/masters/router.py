@@ -1,5 +1,5 @@
 import datetime as dt
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy import or_, select
@@ -59,6 +59,12 @@ def update_party(party_id: int, data: s.PartyUpdate, db: DB):
     party = service.update_party(db, get_or_404(db, Party, party_id, "Party"), data.model_dump(exclude_unset=True))
     db.commit()
     return party
+
+
+@router.get("/parties/{party_id}/balance", response_model=s.PartyBalance, dependencies=[READ])
+def party_balance(party_id: int, db: DB):
+    """Udhaar or advance of one customer, for the challan screen."""
+    return service.party_balance(db, get_or_404(db, Party, party_id, "Party"), dt.date.today())
 
 
 # ---- sites ---------------------------------------------------------------------------------------
@@ -131,9 +137,10 @@ def lookup_rate(
     party_id: int,
     material_id: int,
     on: Annotated[dt.date | None, Query(alias="date")] = None,
+    load_unit: Literal["dumper", "bucket"] | None = None,
 ):
     """Challan screen auto-fill: customer's rate card if one applies, else the material default."""
-    return service.lookup_sale_rate(db, party_id, material_id, on or dt.date.today())
+    return service.lookup_sale_rate(db, party_id, material_id, on or dt.date.today(), load_unit)
 
 
 # ---- vehicles / staff / money accounts -----------------------------------------------------------

@@ -70,6 +70,10 @@ class MaterialIn(BaseModel):
     default_sale_rate: MoneyIn = Decimal("0")
     default_purchase_rate: MoneyIn = Decimal("0")
     hsn_code: str | None = Field(default=None, max_length=20)
+    dumper_qty: PositiveQty | None = None
+    dumper_rate: MoneyIn | None = None
+    bucket_qty: PositiveQty | None = None
+    bucket_rate: MoneyIn | None = None
 
 
 class MaterialUpdate(BaseModel):
@@ -78,6 +82,10 @@ class MaterialUpdate(BaseModel):
     default_sale_rate: MoneyIn | None = None
     default_purchase_rate: MoneyIn | None = None
     hsn_code: str | None = Field(default=None, max_length=20)
+    dumper_qty: PositiveQty | None = None
+    dumper_rate: MoneyIn | None = None
+    bucket_qty: PositiveQty | None = None
+    bucket_rate: MoneyIn | None = None
     is_active: bool | None = None
 
 
@@ -88,6 +96,10 @@ class MaterialOut(ORM):
     default_sale_rate: Decimal
     default_purchase_rate: Decimal
     hsn_code: str | None
+    dumper_qty: Decimal | None
+    dumper_rate: Decimal | None
+    bucket_qty: Decimal | None
+    bucket_rate: Decimal | None
     is_active: bool
 
 
@@ -104,6 +116,17 @@ class RateCardOut(ORM):
     material_id: int
     rate: Decimal
     effective_from: dt.date
+
+
+class PartyBalance(BaseModel):
+    """What the challan screen shows next to the customer."""
+
+    party_id: int
+    balance: Decimal  # positive: customer owes us (udhaar); negative: advance with us
+    oldest_unpaid_date: dt.date | None
+    days_unpaid: int | None
+    advance_low_threshold: Decimal
+    credit_overdue_days: int
 
 
 class RateLookup(BaseModel):

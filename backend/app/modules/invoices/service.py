@@ -51,7 +51,9 @@ def create(db: Session, data: InvoiceIn) -> tuple[Invoice, bool]:
     deliveries = _fetch_docs(db, Delivery, data.delivery_ids, data, "challans")
     rentals = _fetch_docs(db, Rental, data.rental_ids, data, "rentals")
 
-    subtotal = money(sum(d.sale_amount + d.freight_amount for d in deliveries) + sum(r.amount for r in rentals))
+    subtotal = money(
+        sum(d.sale_amount + d.freight_amount + d.extra_amount for d in deliveries) + sum(r.amount for r in rentals)
+    )
     tax = money(subtotal * data.tax_rate / 100) if data.is_tax_invoice else money(0)
     invoice = Invoice(
         invoice_no=next_doc_no(db, "invoice", data.date),
@@ -113,6 +115,14 @@ def lines_of(db: Session, invoice: Invoice) -> list[InvoiceLineOut]:
                 qty=d.qty, unit=d.unit, rate=d.sale_rate, amount=d.sale_amount + d.freight_amount,
             )
         )  # fmt: skip
+        if d.extra_material_id:
+            lines.append(
+                InvoiceLineOut(
+                    kind="challan", doc_id=d.id, doc_no=d.challan_no, date=d.date,
+                    description=materials.get(d.extra_material_id, ""),
+                    qty=d.extra_qty, unit=d.extra_unit, rate=d.extra_rate, amount=d.extra_amount,
+                )
+            )  # fmt: skip
     vehicles = {v.id: v.name for v in db.scalars(select(Vehicle))}
     for r in db.scalars(select(Rental).where(Rental.invoice_id == invoice.id).order_by(Rental.date, Rental.id)):
         lines.append(

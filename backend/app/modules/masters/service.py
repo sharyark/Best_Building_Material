@@ -4,14 +4,17 @@ from decimal import Decimal
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.accounting.balances import account_balances
+from app.accounting.balances import account_balances, balance_of, oldest_unpaid_dates
 from app.accounting.chart import Code, create_sub_account
 from app.accounting.models import Account
-from app.core.errors import Conflict, NotFound
+from app.core.config import get_settings
+from app.core.errors import Conflict, DomainError, NotFound
+from app.core.money import money
 from app.modules.masters.models import Material, MoneyAccount, Party, RateCard, Site, Staff, Vehicle
 from app.modules.masters.schemas import (
     MaterialIn,
     MoneyAccountIn,
+    PartyBalance,
     PartyIn,
     RateCardIn,
     RateLookup,
@@ -133,7 +136,48 @@ def upsert_rate_card(db: Session, data: RateCardIn) -> RateCard:
     return card
 
 
-def lookup_sale_rate(db: Session, party_id: int, material_id: int, on: dt.date) -> RateLookup:
+def party_balance(db: Session, party: Party, today: dt.date) -> PartyBalance:
+    settings = get_settings()
+    balance = balance_of(db, party.account_id) if party.account_id else Decimal(0)
+    oldest = oldest_unpaid_dates(db, [party.account_id]).get(party.account_id) if balance > 0 else None
+    return PartyBalance(
+        party_id=party.id,
+        balance=money(balance),
+        oldest_unpaid_date=oldest,
+        days_unpaid=(today - oldest).days if oldest else None,
+        advance_low_threshold=settings.advance_low_threshold,
+        credit_overdue_days=settings.credit_overdue_days,
+    )
+
+
+def load_factor(material: Material, load_unit: str | None) -> Decimal:
+    """How much stock (in the material's unit) one full load takes out of the yard."""
+    if load_unit is None:
+        return Decimal(1)
+    factor = material.dumper_qty if load_unit == "dumper" else material.bucket_qty
+    if not factor:
+        what = "dumper" if load_unit == "dumper" else "loader bucket"
+        raise DomainError(
+            f"{material.name} has no {what} size yet. Set how much one {what} holds in Masters > Materials.",
+            code="LOAD_SIZE_MISSING",
+            details={"material_id": material.id, "load_unit": load_unit},
+        )
+    return factor
+
+
+def lookup_sale_rate(
+    db: Session, party_id: int, material_id: int, on: dt.date, load_unit: str | None = None
+) -> RateLookup:
+    if load_unit is not None:
+        material = db.get(Material, material_id)
+        if material is None:
+            raise NotFound("Material not found")
+        fixed = material.dumper_rate if load_unit == "dumper" else material.bucket_rate
+        if fixed:
+            return RateLookup(rate=fixed, source="default")
+        # No separate load rate: scale the per-unit rate (customer's card first) by the load size.
+        base = lookup_sale_rate(db, party_id, material_id, on)
+        return RateLookup(rate=money(base.rate * load_factor(material, load_unit)), source=base.source)
     card = db.scalar(
         select(RateCard)
         .where(RateCard.party_id == party_id, RateCard.material_id == material_id, RateCard.effective_from <= on)

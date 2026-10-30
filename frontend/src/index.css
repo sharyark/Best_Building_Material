@@ -19,3 +19,12 @@ body { margin: 0; background: #f5f7fa; }
   .login-art { display: none !important; }
 }
 @media (max-width: 600px) { .hero-art { opacity: .22; } }
+
+/* Challan: vehicle type picker sits above the form, large for thumbs. */
+.challan-vehicle-type { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; max-width: 460px; }
+.challan-vehicle-type .ant-segmented-item-selected { background: #1f4e79; color: #fff; }
+.challan-extra { background: #f3f7fb; border-radius: 10px; padding: 10px 6px 0; margin: 0 0 12px !important; }
+.challan-extra-hint { display: inline-block; margin-top: 34px; }
+@media (max-width: 575px) { .challan-extra-hint { margin: 0 0 10px; } }
+/* Challan: how the customer pays sits in its own band above the save row. */
+.challan-pay { border-top: 1px dashed #d9e2ec; padding-top: 12px; margin-top: 4px; }

@@ -33,6 +33,10 @@ class Settings(BaseSettings):
     currency_symbol: str = "Rs"
     workday_hours: int = 8
     overtime_multiplier: Decimal = Decimal("1.0")
+    # Customer payment reminders: warn when a customer's advance drops below this, and call a
+    # customer's udhaar "old" once the oldest unpaid amount is more than this many days old.
+    advance_low_threshold: Decimal = Decimal("5000")
+    credit_overdue_days: int = 7
 
     # First-run admin, created by `python -m app.bootstrap` if no users exist.
     bootstrap_admin_name: str = "Owner"
