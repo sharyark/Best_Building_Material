@@ -11,9 +11,10 @@ import { DateField, DateRangeField } from '@/components/DateField'
 import { EntitySelect, optionsOf } from '@/components/EntitySelect'
 import { PageHeader } from '@/components/PageHeader'
 import { ReportView } from '@/components/ReportView'
-import { API_DATE, today } from '@/lib/date'
+import { API_DATE, rangeFromUrl, today } from '@/lib/date'
 import { openFile } from '@/lib/download'
 import type { ReportConfig, ReportValues } from './reportConfigs'
+import { StaffKhataSummary } from './StaffKhataSummary'
 
 function params(cfg: ReportConfig, v: ReportValues): Record<string, string | number> {
   const p: Record<string, string | number> = {}
@@ -26,6 +27,7 @@ function params(cfg: ReportConfig, v: ReportValues): Record<string, string | num
   if (cfg.filters.includes('moneyAccount') && v.account) p.money_account_id = v.account
   if (cfg.filters.includes('groupBy')) p.group_by = v.group
   if (cfg.filters.includes('outstandingKind')) p.kind = v.kind
+  if (cfg.filters.includes('direction')) p.direction = v.direction
   return p
 }
 
@@ -34,13 +36,15 @@ export default function ReportPage({ config, embedded = false }: { config: Repor
   const { message } = App.useApp()
   const [search] = useSearchParams()
   const [values, setValues] = useState<ReportValues>(() => ({
-    range: [dayjs().subtract((config.defaultDays ?? 30) - 1, 'day').format(API_DATE), today()],
-    date: today(),
+    // a link may carry the day or range to show (e.g. from the dashboard)
+    range: rangeFromUrl(search) ?? [dayjs().subtract((config.defaultDays ?? 30) - 1, 'day').format(API_DATE), today()],
+    date: rangeFromUrl(search)?.[0] ?? today(),
     party: Number(search.get('party')) || null,
     staff: Number(search.get('staff')) || null,
     account: null,
     group: config.groupOptions?.[0]?.value ?? 'month',
     kind: 'receivable',
+    direction: search.get('direction') === 'out' ? 'out' : 'in',
   }))
   const set = (patch: Partial<ReportValues>) => setValues((v) => ({ ...v, ...patch }))
   const ready = (config.needs ?? []).every((n) => values[n])
@@ -77,6 +81,9 @@ export default function ReportPage({ config, embedded = false }: { config: Repor
         {config.filters.includes('range') && <DateRangeField value={values.range} onChange={(range) => set({ range })} />}
         {(config.filters.includes('date') || config.filters.includes('asOf')) && <div style={{ width: 160 }}><DateField value={values.date} onChange={(date) => set({ date })} /></div>}
         {config.filters.includes('groupBy') && <Select style={{ width: 170 }} value={values.group} onChange={(group) => set({ group })} options={config.groupOptions} />}
+        {config.filters.includes('direction') && (
+          <Select style={{ width: 190 }} value={values.direction} onChange={(direction) => set({ direction })} options={[{ value: 'in', label: 'Money received' }, { value: 'out', label: 'Money paid out' }]} />
+        )}
         {config.filters.includes('outstandingKind') && (
           <Select style={{ width: 240 }} value={values.kind} onChange={(kind) => set({ kind })} options={[{ value: 'receivable', label: 'Receivable (customers owe us)' }, { value: 'payable', label: 'Payable (we owe suppliers)' }]} />
         )}
@@ -86,15 +93,8 @@ export default function ReportPage({ config, embedded = false }: { config: Repor
       </Space>
       {!ready && <Alert type="info" showIcon message={`Choose a ${config.needs?.[0] === 'staff' ? 'worker' : 'party'} to see this report.`} />}
       {error && <Alert type="error" showIcon message={apiError(error).message} />}
+      {ready && !error && data?.meta && 'days_present' in data.meta && <StaffKhataSummary meta={data.meta} />}
       {ready && !error && <ReportView data={data} loading={isLoading} />}
-      {ready && data?.meta && 'days_present' in data.meta && (
-        <Space size="large" wrap style={{ marginTop: 12 }}>
-          <span>Present: <b>{String(data.meta.days_present)}</b> day(s), half: <b>{String(data.meta.half_days)}</b>, absent: <b>{String(data.meta.days_absent)}</b></span>
-          <span>Wages earned: <b>{String(data.meta.wages_earned)}</b></span>
-          <span>Advances paid: <b>{String(data.meta.advances_paid)}</b></span>
-          <span>Balance payable: <b>{String(data.meta.balance_payable)}</b></span>
-        </Space>
-      )}
     </>
   )
 }

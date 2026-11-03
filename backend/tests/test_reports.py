@@ -65,7 +65,7 @@ def test_vehicle_pnl_uses_cost_centre(world):
     by_name = {row["vehicle"]: row for row in r["rows"]}
     assert by_name["Tractor-1"]["revenue"] == "500.00"  # freight only
     assert by_name["Tractor-1"]["diesel"] == "1500.00" and by_name["Tractor-1"]["profit"] == "-1000.00"
-    assert by_name["Tractor-1"]["trips"] == 2
+    assert by_name["Tractor-1"]["trips"] == 3  # 2 trolleys + 1 trolley: each load is a trip
     assert by_name["Loader-1"]["revenue"] == "4800.00" and by_name["Loader-1"]["profit"] == "4800.00"
 
 
@@ -127,7 +127,7 @@ def test_rental_income_report(world):
 def test_dashboard(world):
     build_month(world)
     d = world.get("/reports/dashboard")
-    assert d["trips_today"] == 2 and d["cash_in_hand"] == "2500.00"
+    assert d["trips_today"] == 3 and d["cash_in_hand"] == "2500.00"  # 2 + 1 trolleys
     assert Decimal(d["total_receivable"]) == Decimal("10800.00") and Decimal(d["total_payable"]) == 20000
     assert d["stock_value"] == "14000.00"
 

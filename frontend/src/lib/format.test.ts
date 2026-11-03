@@ -9,9 +9,9 @@ describe('format', () => {
   it('prefixes the currency', () => {
     expect(formatCurrency('1500')).toBe('Rs 1,500.00')
   })
-  it('shows signed balances as Dr / Cr', () => {
-    expect(formatDrCr('1200')).toBe('1,200.00 Dr')
-    expect(formatDrCr('-300.5')).toBe('300.50 Cr')
+  it('shows signed balances as lena / dena', () => {
+    expect(formatDrCr('1200')).toBe('1,200.00 lena')
+    expect(formatDrCr('-300.5')).toBe('300.50 dena')
     expect(formatDrCr(0)).toBe('0.00')
   })
   it('trims quantity decimals', () => {

@@ -25,6 +25,7 @@ ACCOUNTANT = {
     "report.cashbook",
     "report.daybook",
     "report.stock",
+    "report.fuel",
     "report.labour_khata",
 }
 

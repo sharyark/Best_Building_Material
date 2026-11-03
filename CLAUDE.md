@@ -8,9 +8,11 @@ Hisaab Portal replaces the paper registers of a small construction-material supp
 
 Two users, two login pages: the **owner/admin** (`/admin/login`: everything, including void, profit reports, users, opening balances, month lock, audit) and the **munshi/accountant** (`/accountant/login`: daily entries and edits only, no void or profit). `driver` and `customer` roles exist in the schema but their apps (phase 3) are not built.
 
-`ARCHITECTURE.md` is the spec; `README.md` has deploy/backup/CI details and the defaults chosen for open client questions.
+`ARCHITECTURE.md` is the spec; `README.md` has deploy/backup/CI details and the defaults chosen for open client questions; `INSTALL.md` is a non-developer Docker install guide and `MANUAL.md` a user manual (both Roman Urdu); keep MANUAL.md's numbers in step with `app/seed_small.py`.
 
 ## Commands
+
+One-shot local stack: `./dev.sh` (or `dev.ps1`/`dev.bat` on Windows) starts the dev Postgres, creates `backend/.venv` + `backend/.env` on first run, migrates, seeds, and runs API (:8000) and web (:5173). Run it, don't `source` it.
 
 Backend (`cd backend && source .venv/bin/activate`):
 ```bash
@@ -18,8 +20,10 @@ ruff check . && ruff format --check .      # lint (line length 120; alembic/vers
 pytest -q                                   # SQLite, fast
 pytest tests/test_core_flow.py::test_name   # single test
 TEST_DATABASE_URL=postgresql+psycopg://hisaab:hisaab@localhost:5432/hisaab_test pytest -q   # same suite on Postgres
-alembic upgrade head                        # schema (CI also checks migrations match models)
-python -m app.seed [--reset]                # 45 days of demo data; `python -m app.bootstrap` = only first admin
+pip install -e ".[dev]"                      # first-time deps (WeasyPrint needs system pango/harfbuzz libs)
+alembic upgrade head                        # schema
+alembic revision --autogenerate -m "..."    # after model changes; CI runs `alembic check` and fails if models drift
+python -m app.seed [--reset] [--small]      # 45 days of demo data; --small = one of everything, one week (MANUAL.md walks through it); `python -m app.bootstrap` = only first admin
 uvicorn app.main:app --reload               # :8000, docs at /api/docs
 ```
 Local DB: `docker compose -f docker-compose.dev.yml up -d`, or set `DATABASE_URL=sqlite:///./dev.db` + `AUTO_CREATE_TABLES=true` in `backend/.env`. For local HTTP set `COOKIE_SECURE=false`.
@@ -56,9 +60,9 @@ E2E gotcha: login is rate-limited to 5/min/IP (DB-backed), so a full run can tri
 
 **Reports.** Each report builds a generic `ReportTable` that is rendered as JSON, Excel (openpyxl) or PDF (WeasyPrint); document PDFs (challan, invoice, voucher) are in `modules/reports`. Adding a report = one query function + registering it; the frontend `ReportPage` renders any table.
 
-**Frontend.** `src/app/` holds router (lazy routes, `RequireAuth`), `AuthContext` (`useAuth().can(perm)`, `usePermission`) and layout. `src/features/<area>/` per screen; shared building blocks in `src/components/` (`Field` with id-linked labels, `EntitySelect` with inline quick-add via `QuickAdd.tsx`, `CrudTable`, `DocPage`, `ReportPage`, `StatCard`/`HeroBanner`). Data via TanStack Query; after any save, invalidate all queries (balances are cross-cutting). Forms are RHF + Zod. UI hides actions by permission, but the server is the real gate. Currency/locale come from `VITE_CURRENCY`/`VITE_LOCALE`; i18n scaffolding is English-only.
+**Frontend.** `src/app/` holds router (lazy routes, `RequireAuth`), `AuthContext` (`useAuth().can(perm)`, `usePermission`) and layout. `src/features/<area>/` per screen; shared building blocks in `src/components/` (`Field` with id-linked labels, `EntitySelect` with inline quick-add via `QuickAdd.tsx`, `DocPage`, `DocFormShell`, `ReportView`, `StatCard`/`HeroBanner`); `ReportPage` is in `features/reports/` and `CrudTable` (masters lists) in `features/masters/`. Data via TanStack Query; after any save, invalidate all queries (balances are cross-cutting). Forms are RHF + Zod. UI hides actions by permission, but the server is the real gate. Currency/locale come from `VITE_CURRENCY`/`VITE_LOCALE`; i18n scaffolding is English-only.
 
-**Deploy.** `docker-compose.yml` = caddy + api + db + backup; the api container runs `alembic upgrade head` and `app.bootstrap` on start; the app uses a restricted Postgres role. CI (`.github/workflows/ci.yml`) lints, tests on Postgres, builds images, deploys over SSH.
+**Deploy.** `docker-compose.yml` = caddy + api + db + backup; the api container runs `alembic upgrade head` and `app.bootstrap` on start; the app uses a restricted Postgres role. CI (`.github/workflows/ci.yml`) lints, tests on Postgres, builds images, deploys over SSH: pushes to `main` go to production, pushes to `staging` go to a separate stack (`docker-compose.staging.yml`, `.env.staging`).
 
 ## What belongs where
 

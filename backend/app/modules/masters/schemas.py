@@ -1,8 +1,8 @@
 import datetime as dt
 from decimal import Decimal
-from typing import Literal
+from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AfterValidator, BaseModel, ConfigDict, Field
 
 from app.core.types import MoneyIn, PositiveMoney, PositiveQty
 
@@ -64,12 +64,22 @@ class SiteOut(ORM):
     address: str | None
 
 
+def _group(v: str | None) -> str | None:
+    """ "  cement " and "Cement" are one group; blank means no group."""
+    v = (v or "").strip()
+    return v[:1].upper() + v[1:] if v else None
+
+
+GroupName = Annotated[str | None, Field(default=None, max_length=50), AfterValidator(_group)]
+
+
 class MaterialIn(BaseModel):
     name: str = Field(min_length=1, max_length=100)
     unit: Unit
     default_sale_rate: MoneyIn = Decimal("0")
     default_purchase_rate: MoneyIn = Decimal("0")
     hsn_code: str | None = Field(default=None, max_length=20)
+    group_name: GroupName = None
     dumper_qty: PositiveQty | None = None
     dumper_rate: MoneyIn | None = None
     bucket_qty: PositiveQty | None = None
@@ -82,6 +92,7 @@ class MaterialUpdate(BaseModel):
     default_sale_rate: MoneyIn | None = None
     default_purchase_rate: MoneyIn | None = None
     hsn_code: str | None = Field(default=None, max_length=20)
+    group_name: GroupName = None
     dumper_qty: PositiveQty | None = None
     dumper_rate: MoneyIn | None = None
     bucket_qty: PositiveQty | None = None
@@ -96,6 +107,7 @@ class MaterialOut(ORM):
     default_sale_rate: Decimal
     default_purchase_rate: Decimal
     hsn_code: str | None
+    group_name: str | None
     dumper_qty: Decimal | None
     dumper_rate: Decimal | None
     bucket_qty: Decimal | None
@@ -140,6 +152,10 @@ class DriverSuggestion(BaseModel):
     driver_id: int | None
     # today: a substitute already used on this vehicle that day; regular: the vehicle's own driver
     source: Literal["today", "regular"] | None
+    # locked: the vehicle's own driver is on duty, so no one else may be picked
+    locked: bool
+    # who the form may offer: the own driver when locked, else free drivers not marked absent
+    allowed_driver_ids: list[int]
     regular_driver_id: int | None
     regular_absent: bool
     absent_driver_ids: list[int]
@@ -178,6 +194,7 @@ class StaffIn(BaseModel):
     role: StaffRole
     wage_type: WageType
     wage_amount: MoneyIn = Decimal("0")
+    trip_rate: MoneyIn = Decimal("0")
     default_vehicle_id: int | None = None
 
 
@@ -187,6 +204,7 @@ class StaffUpdate(BaseModel):
     role: StaffRole | None = None
     wage_type: WageType | None = None
     wage_amount: MoneyIn | None = None
+    trip_rate: MoneyIn | None = None
     default_vehicle_id: int | None = None
     is_active: bool | None = None
 
@@ -198,6 +216,7 @@ class StaffOut(ORM):
     role: StaffRole
     wage_type: WageType
     wage_amount: Decimal
+    trip_rate: Decimal
     default_vehicle_id: int | None
     account_id: int | None
     is_active: bool

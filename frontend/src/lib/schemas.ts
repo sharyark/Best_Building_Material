@@ -26,12 +26,18 @@ export const deliverySchema = z.object({
   date: isoDate,
   customer_id: id,
   site_id: optionalId,
-  material_id: id,
+  /** UI only: the material list's choice, a material id or a group (negative) whose type is picked next. */
+  material_pick: z.number().int().nullable().optional(),
+  material_id: z.number().int().positive().optional(),
+  /** UI only: which cement type rides on top of a trolley. */
+  cement_type_id: optionalId,
   qty: positiveQty,
   sale_rate: positiveMoney,
   freight_amount: moneyField.default('0'),
   vehicle_id: optionalId,
   driver_id: optionalId,
+  /** Driver's pay for this trip; pre-filled from his trip rate. */
+  trip_pay: optionalMoney,
   notes: z.string().max(500).optional().or(z.literal('')),
   load_size: z.enum(['full', 'half']).default('full'),
   with_cement: z.boolean().default(false),
@@ -44,6 +50,10 @@ export const deliverySchema = z.object({
   paid_amount: optionalMoney,
   money_account_id: optionalId,
 }).superRefine((v, ctx) => {
+  if (!v.material_id) {
+    const group = (v.material_pick ?? 0) < 0
+    ctx.addIssue({ code: 'custom', path: [group ? 'material_id' : 'material_pick'], message: group ? 'Pick the type' : 'Required' })
+  }
   if (v.pay !== 'credit' && !v.money_account_id) ctx.addIssue({ code: 'custom', path: ['money_account_id'], message: 'Pick cash or bank' })
   if (v.pay === 'part' && !(Number(v.paid_amount) > 0)) ctx.addIssue({ code: 'custom', path: ['paid_amount'], message: 'Enter the amount received' })
   if (v.with_cement) {
@@ -63,6 +73,7 @@ export const purchaseSchema = z.object({
   transport_by: z.enum(['own', 'supplier']),
   vehicle_id: optionalId,
   driver_id: optionalId,
+  trip_pay: optionalMoney,
   notes: z.string().max(500).optional().or(z.literal('')),
   lines: z
     .array(z.object({ material_id: id, qty: positiveQty, rate: positiveMoney }))
@@ -79,7 +90,7 @@ export const paymentSchema = z
     staff_id: optionalId,
     money_account_id: id,
     mode: z.enum(['cash', 'bank', 'cheque', 'online']),
-    purpose: z.enum(['general', 'advance', 'salary']),
+    purpose: z.enum(['general', 'advance', 'salary', 'trip']),
     ref_no: z.string().max(60).optional().or(z.literal('')),
     amount: positiveMoney,
     notes: z.string().max(500).optional().or(z.literal('')),
@@ -93,10 +104,12 @@ export type PaymentForm = z.infer<typeof paymentSchema>
 export const expenseSchema = z
   .object({
     date: isoDate,
-    category: z.enum(['diesel', 'repair', 'tyre', 'insurance', 'toll', 'office', 'misc']),
+    category: z.enum(['diesel', 'food', 'repair', 'tyre', 'insurance', 'toll', 'office', 'misc']),
     vehicle_id: optionalId,
-    amount: positiveMoney,
+    /** Fuel with a rate: worked out as litres x rate, so not typed. */
+    amount: optionalMoney,
     litres: z.string().trim().regex(/^(\d{1,9}(\.\d{1,3})?)?$/, 'Enter a number').optional().or(z.literal('')),
+    rate_per_litre: optionalMoney,
     meter_reading: z.string().trim().regex(/^(\d{1,9}(\.\d{1,3})?)?$/, 'Enter a number').optional().or(z.literal('')),
     paid_via: z.enum(['money_account', 'party_credit']),
     money_account_id: optionalId,
@@ -104,6 +117,9 @@ export const expenseSchema = z
     notes: z.string().max(500).optional().or(z.literal('')),
   })
   .superRefine((v, ctx) => {
+    const fuelByRate = v.category === 'diesel' && Number(v.rate_per_litre) > 0
+    if (fuelByRate && !(Number(v.litres) > 0)) ctx.addIssue({ code: 'custom', path: ['litres'], message: 'Enter the litres' })
+    if (!fuelByRate && !(Number(v.amount) > 0)) ctx.addIssue({ code: 'custom', path: ['amount'], message: v.category === 'diesel' ? 'Enter the rate per litre (or the amount)' : 'Must be above 0' })
     if (v.paid_via === 'money_account' && !v.money_account_id)
       ctx.addIssue({ code: 'custom', path: ['money_account_id'], message: 'Pick cash/bank account' })
     if (v.paid_via === 'party_credit' && !v.party_id)
@@ -117,6 +133,7 @@ export const rentalSchema = z.object({
   site_id: optionalId,
   vehicle_id: id,
   operator_id: optionalId,
+  trip_pay: optionalMoney,
   basis: z.enum(['hour', 'trip', 'day']),
   qty: positiveQty,
   rate: positiveMoney,

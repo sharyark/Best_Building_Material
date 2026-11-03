@@ -81,5 +81,6 @@ def fmt_cell(value: Any, col_type: str) -> str:
         return f"{Decimal(str(value)):.1f}%"
     if col_type == "drcr":
         amount = Decimal(str(value))
-        return f"{fmt_money(abs(amount))} {'Dr' if amount > 0 else 'Cr' if amount < 0 else ''}".strip()
+        # + = lena (they owe us), - = dena (we owe them)
+        return f"{fmt_money(abs(amount))} {'lena' if amount > 0 else 'dena' if amount < 0 else ''}".strip()
     return str(value)

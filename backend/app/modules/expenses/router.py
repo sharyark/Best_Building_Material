@@ -19,6 +19,12 @@ def list_expenses(
     return Page(items=rows, total=total, page=params.page, size=params.size)
 
 
+@router.get("/fuel-rate", response_model=s.FuelRate, dependencies=[READ])
+def fuel_rate(db: DB, party_id: int | None = None):
+    """Pre-fills the fuel form with the pump's last price per litre."""
+    return service.last_fuel_rate(db, party_id)
+
+
 @router.get("/{expense_id}", response_model=s.ExpenseOut, dependencies=[READ])
 def get_expense(expense_id: int, db: DB):
     return get_or_404(db, Expense, expense_id, "Expense")

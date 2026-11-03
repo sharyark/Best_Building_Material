@@ -2,6 +2,7 @@ import { EditOutlined } from '@ant-design/icons'
 import { Button, Card, Grid, Modal, Select, Space, Table, Tag, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { usePage } from '@/api/hooks'
 import { useLookups } from '@/api/lookups'
 import type { Delivery } from '@/api/types'
@@ -14,7 +15,7 @@ import { PrintButton } from '@/components/PrintButton'
 import { StatusTag } from '@/components/StatusTag'
 import { VoidButton } from '@/components/VoidButton'
 import { usePermission } from '@/hooks/usePermission'
-import { formatDate, startOfMonth, today } from '@/lib/date'
+import { formatDate, rangeFromUrl, startOfMonth, today } from '@/lib/date'
 import { formatQty } from '@/lib/format'
 import { openFile } from '@/lib/download'
 import { getPaper } from '@/lib/paper'
@@ -24,7 +25,9 @@ import { STICKY_HEADER } from '@/components/tableDefaults'
 export default function ChallanPage() {
   const lookups = useLookups()
   const canEdit = usePermission('challan.update')
-  const [range, setRange] = useState<DateRange>([startOfMonth(), today()])
+  const [search] = useSearchParams()
+  // ?date= from the dashboard opens that day's challans
+  const [range, setRange] = useState<DateRange>(() => rangeFromUrl(search) ?? [startOfMonth(), today()])
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [status, setStatus] = useState<string | undefined>()
   const [page, setPage] = useState(1)

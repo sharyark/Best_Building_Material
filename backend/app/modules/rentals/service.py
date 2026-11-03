@@ -1,3 +1,5 @@
+import math
+
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
@@ -9,12 +11,13 @@ from app.core.errors import Conflict, NotFound
 from app.core.money import money
 from app.core.pagination import ListParams, apply_sort, paginate
 from app.modules.common import ensure_active, find_by_client_ref, get_or_404, mark_edited, mark_void
+from app.modules.masters import service as masters
 from app.modules.masters.models import Party, Site, Staff, Vehicle
 from app.modules.rentals.models import Rental
 from app.modules.rentals.schemas import RentalIn
 
 
-def _validate(db: Session, data: RentalIn) -> Party:
+def _validate(db: Session, data: RentalIn, saved: Rental | None = None) -> Party:
     customer = db.get(Party, data.customer_id)
     if customer is None or customer.type == "supplier":
         raise NotFound("Customer not found")
@@ -26,6 +29,8 @@ def _validate(db: Session, data: RentalIn) -> Party:
             raise NotFound("Site not found for this customer")
     if data.operator_id and not db.get(Staff, data.operator_id):
         raise NotFound("Operator not found")
+    if saved is None or (saved.vehicle_id, saved.operator_id) != (data.vehicle_id, data.operator_id):
+        masters.ensure_driver_allowed(db, data.vehicle_id, data.operator_id, data.date)
     return customer
 
 
@@ -35,6 +40,8 @@ def _apply(db: Session, r: Rental, data: RentalIn, customer: Party) -> None:
     r.site_id = data.site_id
     r.vehicle_id = data.vehicle_id
     r.operator_id = data.operator_id
+    r.trips = max(1, math.ceil(data.qty)) if data.basis == "trip" else 1
+    r.trip_pay, operator_account = masters.trip_pay_for(db, data.operator_id, data.trip_pay, r.trips)
     r.basis = data.basis
     r.qty = data.qty
     r.rate = data.rate
@@ -47,7 +54,8 @@ def _apply(db: Session, r: Rental, data: RentalIn, customer: Party) -> None:
         source_type="rental",
         source_id=r.id,
         narration=f"Rental {r.rental_no}: {data.qty} {data.basis} to {customer.name}",
-        lines=rules.rental(Chart(db), customer.account_id, r.amount, r.vehicle_id),
+        lines=rules.rental(Chart(db), customer.account_id, r.amount, r.vehicle_id)
+        + rules.trip_pay(Chart(db), operator_account, r.trip_pay, r.vehicle_id),
     )
     r.journal_id = entry.id
 
@@ -79,7 +87,7 @@ def update(db: Session, rental_id: int, data: RentalIn) -> Rental:
     # Before any other check, so a missing reason is the first thing the munshi is told.
     mark_edited(db, r, data.edit_reason)
     _ensure_not_invoiced(r)
-    customer = _validate(db, data)
+    customer = _validate(db, data, r)
     ensure_period_open(db, r.date, data.date)
     reverse(db, r.journal_id, reason=f"{r.rental_no} changed")
     _apply(db, r, data, customer)

@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, String, Text, UniqueConstraint
+from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, BigIntFK, BigIntPK, Money, Qty, Rate, TimestampMixin
@@ -40,6 +40,10 @@ class Delivery(Base, TimestampMixin, TxnMixin):
     extra_cost_amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     vehicle_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("vehicles.id"), nullable=True)
     driver_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("staff.id"), nullable=True)
+    # Owed to the driver for this trip; credited to his khata in the challan's own journal entry.
+    trip_pay: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    # Trips the driver made: one per trolley/dumper/bucket load of loose material, else one per challan.
+    trips: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     invoice_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("invoices.id"), nullable=True)
     # Money the customer paid on the spot, entered with the challan as a normal receipt.
     receipt_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("payments.id"), nullable=True)

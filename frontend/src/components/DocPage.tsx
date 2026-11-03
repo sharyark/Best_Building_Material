@@ -2,9 +2,10 @@ import { EditOutlined, PlusOutlined } from '@ant-design/icons'
 import { Button, Grid, Modal, Select, Space, Table } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import { useState, type ComponentType } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import { usePage } from '@/api/hooks'
 import { usePermission } from '@/hooks/usePermission'
-import { startOfMonth, today } from '@/lib/date'
+import { rangeFromUrl, startOfMonth, today } from '@/lib/date'
 import { DateRangeField, type DateRange } from './DateField'
 import { EntitySelect, type Option } from './EntitySelect'
 import { PageHeader } from './PageHeader'
@@ -48,19 +49,22 @@ interface Props<T extends Doc, P> {
   expandedRender?: (d: T) => React.ReactNode
   /** Shown between the header and the list filters, e.g. an export card. */
   beforeList?: React.ReactNode
+  /** Open a new entry straight away (a shortcut link such as /expenses?new=food). */
+  autoOpen?: { preset?: P }
 }
 
 /** Date-range filtered list with create / edit / void / print, used by every non-challan document. */
 export function DocPage<T extends Doc, P = undefined>({
-  title, subtitle, endpoint, columns, createPerm, updatePerm, voidPerm, docLabel, Form, newButtons, filters = [], printUrl, thermalPrint = false, modalWidth = 720, editable = true, expandedRender, beforeList,
+  title, subtitle, endpoint, columns, createPerm, updatePerm, voidPerm, docLabel, Form, newButtons, filters = [], printUrl, thermalPrint = false, modalWidth = 720, editable = true, expandedRender, beforeList, autoOpen,
 }: Props<T, P>) {
   const canCreate = usePermission(createPerm)
   const canUpdate = usePermission(updatePerm)
-  const [range, setRange] = useState<DateRange>([startOfMonth(), today()])
+  const [search] = useSearchParams()
+  const [range, setRange] = useState<DateRange>(() => rangeFromUrl(search) ?? [startOfMonth(), today()])
   const [extra, setExtra] = useState<Record<string, number | null>>({})
   const [status, setStatus] = useState<string | undefined>()
   const [page, setPage] = useState(1)
-  const [modal, setModal] = useState<{ doc?: T; preset?: P } | null>(null)
+  const [modal, setModal] = useState<{ doc?: T; preset?: P } | null>(() => (autoOpen && canCreate ? autoOpen : null))
   const { data, isLoading } = usePage<T>(endpoint, { from: range[0], to: range[1], status, page, size: 25, ...extra })
 
   const wide = Grid.useBreakpoint().md ?? false

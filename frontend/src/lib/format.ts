@@ -28,7 +28,8 @@ export function formatQty(v: Num): string {
 export function formatDrCr(v: Num): string {
   const n = toNumber(v)
   if (n === 0) return formatMoney(0)
-  return `${formatMoney(Math.abs(n))} ${n > 0 ? 'Dr' : 'Cr'}`
+  // + = lena (they owe us), - = dena (we owe them); no debit/credit words on screen
+  return `${formatMoney(Math.abs(n))} ${n > 0 ? 'lena' : 'dena'}`
 }
 
 /** Rounds a JS number to 2dp without float noise, as a string for the API. */

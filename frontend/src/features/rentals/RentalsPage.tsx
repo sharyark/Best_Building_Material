@@ -18,6 +18,7 @@ import { usePermission } from '@/hooks/usePermission'
 import { formatDate, today } from '@/lib/date'
 import { formatQty, toNumber } from '@/lib/format'
 import { rentalSchema, type RentalForm } from '@/lib/schemas'
+import { useTripPay } from '@/hooks/useTripPay'
 import { useVehicleDriver } from '@/hooks/useVehicleDriver'
 
 function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
@@ -30,13 +31,17 @@ function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
     resolver: zodResolver(rentalSchema),
     defaultValues: {
       date: doc?.date ?? today(), customer_id: doc?.customer_id as number, site_id: doc?.site_id ?? null, vehicle_id: doc?.vehicle_id as number,
-      operator_id: doc?.operator_id ?? null, basis: doc?.basis ?? 'hour', qty: doc ? String(doc.qty) : '', rate: doc ? String(doc.rate) : '', notes: doc?.notes ?? '',
+      operator_id: doc?.operator_id ?? null, trip_pay: doc ? String(doc.trip_pay ?? '0') : '', basis: doc?.basis ?? 'hour', qty: doc ? String(doc.qty) : '', rate: doc ? String(doc.rate) : '', notes: doc?.notes ?? '',
     },
   })
   const [customerId, qty, rate, basis] = useWatch({ control, name: ['customer_id', 'qty', 'rate', 'basis'] })
   const [date, vehicleId, operatorId] = useWatch({ control, name: ['date', 'vehicle_id', 'operator_id'] })
   const setOperator = useCallback((id: number | null) => setValue('operator_id', id), [setValue])
-  const operator = useVehicleDriver({ vehicleId, date, driverId: operatorId, setDriver: setOperator, editing: Boolean(doc) })
+  const operator = useVehicleDriver({ vehicleId, date, driverId: operatorId, setDriver: setOperator, editing: Boolean(doc), role: 'operator' })
+  // Same rule as the server: charged per trip -> that many trips; per hour or day -> one.
+  const trips = basis === 'trip' ? Math.max(1, Math.ceil(toNumber(qty))) : 1
+  const setTripPay = useCallback((v: string) => setValue('trip_pay', v), [setValue])
+  const tripPay = useTripPay({ driverId: operatorId, trips, setTripPay, editing: Boolean(doc) })
   const sites = lookups.sites.filter((s) => s.party_id === customerId)
   const save = useSave<object>(doc ? 'put' : 'post', doc ? `/rentals/${doc.id}` : '/rentals', { successMessage: 'Rental saved', onSuccess: onDone })
   const machines = lookups.vehicles.filter((v) => v.type === 'loader' || v.type === 'dumper' || v.type === 'tractor_trolley')
@@ -45,7 +50,7 @@ function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
     <DocFormShell
       editReason={doc ? { value: editReason, onChange: setEditReason } : undefined}
       saving={save.isPending}
-      onSubmit={handleSubmit((v) => save.mutate({ ...v, site_id: v.site_id || null, operator_id: v.operator_id || null, notes: v.notes || null, ...(doc ? { edit_reason: editReason.trim() } : { client_ref: clientRef.current }) }))}
+      onSubmit={handleSubmit((v) => save.mutate({ ...v, site_id: v.site_id || null, operator_id: v.operator_id || null, trip_pay: v.operator_id ? v.trip_pay || '0' : null, notes: v.notes || null, ...(doc ? { edit_reason: editReason.trim() } : { client_ref: clientRef.current }) }))}
       extra={<Typography.Text>Amount: <Typography.Text strong><Money value={toNumber(qty) * toNumber(rate)} /></Typography.Text></Typography.Text>}
     >
       <Row gutter={12}>
@@ -53,13 +58,15 @@ function RentalFormView({ doc, onDone }: DocFormProps<Rental, undefined>) {
         <Col xs={24} sm={16}><Field control={control} name="customer_id" label="Customer" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.customers)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus addLabel="New customer" onAdd={canAdd ? (n) => setAdding(n) : undefined} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="site_id" label="Site">{(f) => <EntitySelect id={f.id} options={optionsOf(sites)} value={f.value} onChange={f.onChange} disabled={!customerId} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="vehicle_id" label="Machine" required>{(f) => <EntitySelect id={f.id} options={optionsOf(machines)} value={f.value} onChange={(v) => { operator.release(); f.onChange(v) }} allowClear={false} />}</Field></Col>
-        <Col xs={24} sm={12}><Field control={control} name="operator_id" label="Operator" extra={operator.hint}>{(f) => <EntitySelect id={f.id} options={operator.options} value={f.value} onChange={(v) => { operator.onPick(); f.onChange(v) }} />}</Field></Col>
+        <Col xs={24} sm={12}><Field control={control} name="operator_id" label="Operator" extra={operator.hint}>{(f) => <EntitySelect id={f.id} {...operator.selectProps} value={f.value} onChange={(v) => { operator.onPick(); f.onChange(v) }} />}</Field></Col>
         <Col xs={24} sm={12}><Field control={control} name="basis" label="Charged per" required>{(f) => <Select {...f} options={[{ value: 'hour', label: 'Hour' }, { value: 'trip', label: 'Trip' }, { value: 'day', label: 'Day' }]} />}</Field></Col>
         <Col xs={12}><Field control={control} name="qty" label={`Quantity (${basis}s)`} required>{(f) => <QtyInput {...f} />}</Field></Col>
         <Col xs={12}><Field control={control} name="rate" label={`Rate per ${basis}`} required>{(f) => <MoneyInput {...f} />}</Field></Col>
+        {operatorId && <Col xs={24} sm={12}><Field control={control} name="trip_pay" label="Trip pay (operator)" extra={tripPay.rateNote}>{(f) => <MoneyInput {...f} value={f.value ?? ''} onChange={(v) => { tripPay.onType(); f.onChange(v) }} />}</Field></Col>}
         <Col xs={24}><Field control={control} name="notes" label="Notes">{(f) => <Input {...f} value={f.value ?? ''} />}</Field></Col>
       </Row>
       <QuickAddParty open={adding !== null} type="customer" initialName={adding ?? ''} onClose={() => setAdding(null)} onCreated={(p) => setValue('customer_id', p.id, { shouldValidate: true })} />
+      {operator.modal}
     </DocFormShell>
   )
 }

@@ -44,6 +44,9 @@ class SettlementPreview(BaseModel):
     wage_type: str
     days: Decimal
     trips: int
+    trip_pay: Decimal  # already added to the khata trip by trip; not part of `gross`
+    absent_days: Decimal  # absent = 1, half day = 0.5; for the "Chutti" deduction
+    day_rate: Decimal | None  # monthly pay / 30: what one day of chutti costs; None for daily/per-trip pay
     gross: Decimal
     accrues_on_settlement: bool  # daily labour already accrued per attendance day
     advances_in_period: Decimal
@@ -55,7 +58,9 @@ class SettlementIn(BaseModel):
     period_from: dt.date
     period_to: dt.date
     deductions: MoneyIn = Decimal("0")
-    advances_adjusted: MoneyIn | None = None  # default: advances paid in the period
+    deduction_reason: str | None = Field(default=None, max_length=120)
+    # No advances field: the settlement takes the advances actually entered in Payments for the period,
+    # so the settlement and the khata can never disagree.
     notes: str | None = None
     client_ref: uuid.UUID | None = None
 
@@ -72,6 +77,7 @@ class SettlementOut(BaseModel):
     gross: Decimal
     advances_adjusted: Decimal
     deductions: Decimal
+    deduction_reason: str | None
     net_payable: Decimal
     journal_id: int | None
     status: str

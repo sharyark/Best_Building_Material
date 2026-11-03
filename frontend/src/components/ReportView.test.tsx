@@ -19,8 +19,8 @@ describe('ReportView', () => {
     render(<ReportView data={data} />)
     expect(screen.getByText('01-10-2026')).toBeInTheDocument()
     expect(screen.getAllByText('6,500.00').length).toBeGreaterThan(0)
-    expect(screen.getByText('6,500.00 Dr')).toBeInTheDocument()
-    expect(screen.getAllByText('1,200.00 Cr').length).toBeGreaterThan(0)
+    expect(screen.getByText('6,500.00 lena')).toBeInTheDocument()
+    expect(screen.getAllByText('1,200.00 dena').length).toBeGreaterThan(0)
     expect(screen.getByText('2.5')).toBeInTheDocument()
   })
   it('renders the totals row', () => {

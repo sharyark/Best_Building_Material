@@ -42,6 +42,8 @@ class WageSettlement(Base, TimestampMixin, TxnMixin):
     gross: Mapped[Decimal] = mapped_column(Money)
     advances_adjusted: Mapped[Decimal] = mapped_column(Money, default=0)
     deductions: Mapped[Decimal] = mapped_column(Money, default=0)
+    # Why pay was cut (e.g. "Chutti: 2 din"); shown in the worker's khata. Required when deductions > 0.
+    deduction_reason: Mapped[str | None] = mapped_column(String(120), nullable=True)
     net_payable: Mapped[Decimal] = mapped_column(Money)
     journal_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("journal_entries.id"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)

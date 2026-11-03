@@ -53,6 +53,15 @@ describe('paymentSchema', () => {
   })
 })
 
+describe('deliverySchema material groups', () => {
+  it('asks for the type when a group (e.g. Cement) is picked', () => {
+    const r = deliverySchema.safeParse({ ...delivery, material_id: undefined, material_pick: -1 })
+    expect(r.success).toBe(false)
+    expect(!r.success && r.error.issues.find((i) => i.path[0] === 'material_id')?.message).toBe('Pick the type')
+    expect(deliverySchema.safeParse({ ...delivery, material_id: 7, material_pick: -1 }).success).toBe(true)
+  })
+})
+
 describe('expenseSchema', () => {
   const base = { date: '2026-10-17', category: 'diesel', amount: '1500', paid_via: 'money_account' }
   it('needs the account matching how it was paid', () => {
@@ -60,6 +69,12 @@ describe('expenseSchema', () => {
     expect(expenseSchema.safeParse({ ...base, money_account_id: 1 }).success).toBe(true)
     expect(expenseSchema.safeParse({ ...base, paid_via: 'party_credit' }).success).toBe(false)
     expect(expenseSchema.safeParse({ ...base, paid_via: 'party_credit', party_id: 9 }).success).toBe(true)
+  })
+  it('takes fuel as litres x rate with no amount typed', () => {
+    const fuel = { date: '2026-10-17', category: 'diesel', paid_via: 'money_account', money_account_id: 1, amount: '' }
+    expect(expenseSchema.safeParse({ ...fuel, litres: '40', rate_per_litre: '280.50' }).success).toBe(true)
+    expect(expenseSchema.safeParse({ ...fuel, rate_per_litre: '280.50' }).success).toBe(false) // litres missing
+    expect(expenseSchema.safeParse(fuel).success).toBe(false) // neither a rate nor an amount
   })
 })
 

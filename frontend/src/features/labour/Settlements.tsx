@@ -1,4 +1,4 @@
-import { App, Button, Card, Descriptions, Space, Table } from 'antd'
+import { App, Button, Card, Descriptions, Input, Select, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
 import { useState } from 'react'
@@ -15,8 +15,16 @@ import { StatusTag } from '@/components/StatusTag'
 import { VoidButton } from '@/components/VoidButton'
 import { usePermission } from '@/hooks/usePermission'
 import { API_DATE, formatDate, today } from '@/lib/date'
-import { formatQty } from '@/lib/format'
+import { formatCurrency, formatQty } from '@/lib/format'
 import { STICKY_HEADER } from '@/components/tableDefaults'
+
+/** Why pay is cut; the text goes to the worker's khata as "katoti 1,000: Chutti: 2 din". */
+const REASONS = [
+  { value: 'Chutti', label: 'Chutti (absent din)' },
+  { value: 'Jurmana', label: 'Jurmana (fine)' },
+  { value: 'Nuqsan', label: 'Nuqsan (damage)' },
+  { value: 'Other', label: 'Other' },
+]
 
 export default function Settlements() {
   const { message } = App.useApp()
@@ -26,12 +34,13 @@ export default function Settlements() {
   const [range, setRange] = useState<DateRange>([dayjs().startOf('month').format(API_DATE), today()])
   const [preview, setPreview] = useState<SettlementPreview | null>(null)
   const [deductions, setDeductions] = useState('0')
-  const [advances, setAdvances] = useState('')
+  const [reason, setReason] = useState<string | undefined>()
+  const [detail, setDetail] = useState('')
   const [loading, setLoading] = useState(false)
   const list = useGet<Settlement[]>('/labour/settlements', { staff_id: staffId })
   const save = useSave<object>('post', '/labour/settlements', {
     successMessage: 'Settlement saved and posted to the books',
-    onSuccess: () => { setPreview(null); setDeductions('0'); setAdvances('') },
+    onSuccess: () => { setPreview(null); setDeductions('0'); setReason(undefined); setDetail('') },
   })
 
   async function load() {
@@ -40,7 +49,6 @@ export default function Settlements() {
     try {
       const { data } = await api.get<SettlementPreview>('/labour/settlements/preview', { params: { staff_id: staffId, period_from: range[0], period_to: range[1] } })
       setPreview(data)
-      setAdvances(data.advances_in_period)
     } catch (e) {
       message.error(apiError(e).message)
     } finally {
@@ -48,7 +56,18 @@ export default function Settlements() {
     }
   }
 
-  const net = preview ? Number(preview.gross) - Number(advances || 0) - Number(deductions || 0) : 0
+  // Advances come from Payments (purpose Advance), so the settlement always agrees with the khata.
+  const net = preview ? Number(preview.gross) - Number(preview.advances_in_period) - Number(deductions || 0) : 0
+  const absent = Number(preview?.absent_days ?? 0)
+  const reasonText = [reason === 'Other' ? '' : reason, detail.trim()].filter(Boolean).join(': ')
+  function pickReason(r: string) {
+    setReason(r)
+    // Chutti on a monthly salary: absent days x one day's pay, which the munshi can still change
+    if (r === 'Chutti' && preview?.day_rate && absent > 0) {
+      setDeductions(String(Math.round(absent * Number(preview.day_rate))))
+      setDetail(`${formatQty(absent)} din`)
+    }
+  }
   const columns: ColumnsType<Settlement> = [
     { title: 'Worker', dataIndex: 'staff_id', render: (id: number) => lookups.staffById.get(id)?.name },
     { title: 'Period', render: (_, s) => `${formatDate(s.period_from)} – ${formatDate(s.period_to)}` },
@@ -57,6 +76,7 @@ export default function Settlements() {
     { title: 'Gross', dataIndex: 'gross', align: 'right', render: (v) => <Money value={v} /> },
     { title: 'Advances', dataIndex: 'advances_adjusted', align: 'right', render: (v) => <Money value={v} /> },
     { title: 'Deductions', dataIndex: 'deductions', align: 'right', render: (v) => <Money value={v} /> },
+    { title: 'Katoti ki wajah', dataIndex: 'deduction_reason', render: (v: string | null) => v ?? '' },
     { title: 'Net', dataIndex: 'net_payable', align: 'right', render: (v) => <Money value={v} bold /> },
     { title: 'Status', render: (_, s) => <StatusTag status={s.status} reason={s.void_reason} /> },
     { title: '', render: (_, s) => s.status === 'active' && <VoidButton path={`/labour/settlements/${s.id}`} perm="settlement.void" label="settlement" /> },
@@ -76,19 +96,40 @@ export default function Settlements() {
             <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 4 }} bordered>
               <Descriptions.Item label="Pay type">{preview.wage_type.replace('_', ' ')}</Descriptions.Item>
               <Descriptions.Item label="Days present">{formatQty(preview.days)}</Descriptions.Item>
+              <Descriptions.Item label="Chutti (absent)">{absent > 0 ? `${formatQty(absent)} din` : 'None'}</Descriptions.Item>
               <Descriptions.Item label="Trips">{preview.trips}</Descriptions.Item>
+              {Number(preview.trip_pay) > 0 && <Descriptions.Item label="Trip pay (already in khata)"><Money value={preview.trip_pay} /></Descriptions.Item>}
               <Descriptions.Item label="Gross wages"><Money value={preview.gross} bold /></Descriptions.Item>
               <Descriptions.Item label="Advances in period"><Money value={preview.advances_in_period} /></Descriptions.Item>
-              <Descriptions.Item label="Current balance"><Money value={preview.current_balance} drcr /></Descriptions.Item>
+              <Descriptions.Item label="Baqaya"><Money value={preview.current_balance} drcr /></Descriptions.Item>
             </Descriptions>
             {!preview.accrues_on_settlement && <p style={{ margin: '8px 0 0', color: '#8c8c8c' }}>Daily-wage workers already earned these wages day by day when attendance was saved. Settling records the period and any deduction.</p>}
             {canSettle && (
+              <>
               <Space wrap align="end" style={{ marginTop: 12 }}>
-                <label>Advances adjusted<div style={{ width: 170 }}><MoneyInput value={advances} onChange={setAdvances} /></div></label>
-                <label>Deductions (fines / absences)<div style={{ width: 170 }}><MoneyInput value={deductions} onChange={setDeductions} /></div></label>
+                <div>
+                  <div>Advance (from Payments)</div>
+                  <div className="settle-advance"><Money value={preview.advances_in_period} bold /></div>
+                </div>
+                <label htmlFor="cut-amount">Katoti (deduction)<div style={{ width: 170 }}><MoneyInput id="cut-amount" value={deductions} onChange={setDeductions} /></div></label>
+                <label htmlFor="cut-reason">Katoti ki wajah<div style={{ width: 200 }}><Select id="cut-reason" style={{ width: '100%' }} placeholder="Choose reason" value={reason} onChange={pickReason} options={REASONS} allowClear onClear={() => setReason(undefined)} /></div></label>
+                <label htmlFor="cut-detail">Detail<div style={{ width: 220 }}><Input id="cut-detail" value={detail} onChange={(e) => setDetail(e.target.value)} maxLength={80} placeholder="e.g. 2 din, tyre phata" /></div></label>
                 <b>Net payable: <Money value={net} bold /></b>
-                <Button type="primary" loading={save.isPending} onClick={() => save.mutate({ staff_id: staffId, period_from: range[0], period_to: range[1], deductions: deductions || '0', advances_adjusted: advances || '0' })}>Save settlement</Button>
+                <Button type="primary" loading={save.isPending}
+                  onClick={() => {
+                    if (Number(deductions) > 0 && !reasonText) { message.warning('Choose why the pay is cut (Chutti, Jurmana...) so it shows in the khata.'); return }
+                    save.mutate({ staff_id: staffId, period_from: range[0], period_to: range[1], deductions: deductions || '0', deduction_reason: Number(deductions) > 0 ? reasonText : null })
+                  }}>Save settlement</Button>
               </Space>
+              <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+                Advance dena ho to pehle Payments &gt; New payment (money out) mein Purpose "Advance" se darj karein; yahan khud aa jayega.
+              </Typography.Text>
+              {reason === 'Chutti' && preview.day_rate && (
+                <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+                  {formatQty(absent)} din × {formatCurrency(preview.day_rate)} (tankhwah ÷ 30). Badal sakte hain.
+                </Typography.Text>
+              )}
+              </>
             )}
           </div>
         )}

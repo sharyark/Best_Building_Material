@@ -24,9 +24,11 @@ class Code:
     INSURANCE = "5130"
     TOLL = "5140"
     OFFICE = "5150"
+    FOOD = "5160"
     MISC = "5190"
     SALARY = "5200"
     LABOUR_WAGES = "5210"
+    TRIP_PAY = "5220"
     STOCK_LOSS = "5300"
 
 
@@ -48,9 +50,11 @@ SYSTEM_ACCOUNTS: list[tuple[str, str, str]] = [
     (Code.INSURANCE, "Expense - Insurance", "expense"),
     (Code.TOLL, "Expense - Toll", "expense"),
     (Code.OFFICE, "Expense - Office", "expense"),
+    (Code.FOOD, "Expense - Food (khana)", "expense"),
     (Code.MISC, "Expense - Miscellaneous", "expense"),
     (Code.SALARY, "Expense - Salary", "expense"),
     (Code.LABOUR_WAGES, "Expense - Labour Wages", "expense"),
+    (Code.TRIP_PAY, "Expense - Driver Trip Pay", "expense"),
     (Code.STOCK_LOSS, "Expense - Stock Loss", "expense"),
 ]
 
@@ -61,6 +65,7 @@ EXPENSE_CATEGORY_CODE = {
     "insurance": Code.INSURANCE,
     "toll": Code.TOLL,
     "office": Code.OFFICE,
+    "food": Code.FOOD,
     "misc": Code.MISC,
 }
 
