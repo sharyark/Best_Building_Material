@@ -54,6 +54,13 @@ def labour_wage(chart: Chart, staff_account: int, amount: Decimal, vehicle_id: i
     return [dr(chart.id(Code.LABOUR_WAGES), amount, vehicle_id), cr(staff_account, amount)]
 
 
+def trip_pay(chart: Chart, staff_account: int | None, amount: Decimal, vehicle_id: int | None) -> list[Line]:
+    """Driver's pay for one trip, added to the challan/purchase entry. A vehicle cost, so it hits vehicle P&L."""
+    if staff_account is None or not amount:
+        return []
+    return [dr(chart.id(Code.TRIP_PAY), amount, vehicle_id), cr(staff_account, amount)]
+
+
 def salary(
     chart: Chart,
     staff_account: int,

@@ -16,6 +16,7 @@ import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
 import { QuickAddParty, QuickAddSite } from '@/components/QuickAdd'
 import { usePermission } from '@/hooks/usePermission'
+import { useTripPay } from '@/hooks/useTripPay'
 import { useVehicleDriver } from '@/hooks/useVehicleDriver'
 import { formatCurrency, formatQty, toNumber } from '@/lib/format'
 import { today } from '@/lib/date'
@@ -48,12 +49,15 @@ const blank = (last: Last): DeliveryForm => ({
   date: last.date ?? today(),
   customer_id: undefined as unknown as number,
   site_id: null,
-  material_id: undefined as unknown as number,
+  material_pick: null,
+  material_id: undefined,
+  cement_type_id: null,
   qty: '',
   sale_rate: '',
   freight_amount: '0',
   vehicle_id: last.vehicle_id ?? null,
   driver_id: last.driver_id ?? null,
+  trip_pay: '',
   notes: '',
   load_size: 'full',
   with_cement: false,
@@ -136,10 +140,13 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
     defaultValues: delivery
       ? {
           date: delivery.date, customer_id: delivery.customer_id, site_id: delivery.site_id, material_id: delivery.material_id,
+          // the list shows a type's group once lookups load (see the sync effect below)
+          material_pick: delivery.material_id, cement_type_id: delivery.extra_material_id,
           // qty on the challan is already halved; the form edits the number of loads
           qty: delivery.load_size === 'half' ? String(toNumber(delivery.qty) * 2) : String(delivery.qty),
           sale_rate: String(delivery.sale_rate), freight_amount: String(delivery.freight_amount),
           vehicle_id: delivery.vehicle_id, driver_id: delivery.driver_id, notes: delivery.notes ?? '',
+          trip_pay: String(delivery.trip_pay ?? '0'),
           load_size: delivery.load_size,
           // a second loose material on a half load is the other half; anything else rode along (cement)
           with_cement: delivery.extra_material_id !== null && !(delivery.load_size === 'half' && delivery.extra_unit === 'trolley'),
@@ -154,6 +161,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
     control,
     name: ['date', 'customer_id', 'material_id', 'qty', 'sale_rate', 'freight_amount', 'load_size', 'with_cement', 'other_half_id', 'extra_qty', 'extra_rate', 'pay', 'paid_amount', 'money_account_id'],
   })
+  const [materialPick, cementTypeId] = useWatch({ control, name: ['material_pick', 'cement_type_id'] })
   const balanceQuery = useGet<PartyBalance>(`/masters/parties/${customerId}/balance`, undefined, { enabled: Boolean(customerId), staleTime: 5_000 })
   // keepPreviousData would briefly show the last customer's khata; only trust a matching answer
   const khata = balanceQuery.data?.party_id === customerId ? balanceQuery.data : undefined
@@ -164,15 +172,48 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
     if (pay !== 'credit' && !moneyAccountId && cashAccount) setValue('money_account_id', cashAccount.id)
   }, [pay, moneyAccountId, cashAccount, setValue])
 
-  const material = lookups.materialById.get(materialId)
+  const material = (materialId ? lookups.materialById.get(materialId) : undefined)
   const loose = isLoose(material)
   // Bags or pieces on a dumper are still counted in their own unit.
   const loadUnit = loose ? typeInfo.loadUnit : null
   const unitLabel = loose ? typeInfo.load : material?.unit
-  const cement = useMemo(
-    () => lookups.materials.find((m) => /cement/i.test(m.name)) ?? lookups.materials.find((m) => m.unit === 'bag'),
-    [lookups.materials],
+  // Types of one product (e.g. three cements) are listed once by group; the Type field then picks one.
+  const groups = useMemo(() => {
+    const byKey = new Map<string, { label: string; types: Material[] }>()
+    for (const m of lookups.materials) {
+      if (!m.group_name) continue
+      const key = m.group_name.toLowerCase()
+      if (!byKey.has(key)) byKey.set(key, { label: m.group_name, types: [] })
+      byKey.get(key)!.types.push(m)
+    }
+    return [...byKey.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([key, g], i) => ({ key, value: -(i + 1), ...g }))
+  }, [lookups.materials])
+  const groupOf = (m: Material | undefined) => (m?.group_name ? groups.find((g) => g.key === m.group_name!.toLowerCase()) : undefined)
+  const materialOptions = useMemo(
+    () => [
+      ...lookups.materials.filter((m) => !m.group_name).map((m) => ({ value: m.id, label: `${m.name} (${m.unit})` })),
+      ...groups.map((g) => ({ value: g.value, label: `${g.label} (${g.types.length} types)` })),
+    ].sort((a, b) => a.label.localeCompare(b.label)),
+    [lookups.materials, groups],
   )
+  const typeRef = useRef<RefSelectProps>(null)
+  const pickedGroup = groups.find((g) => g.value === materialPick) ?? groupOf(material)
+  // Keep the list showing the group of the chosen type (an edit, or a type picked in an earlier entry).
+  useEffect(() => {
+    if (!material) return
+    const want = groupOf(material)?.value ?? material.id
+    if (materialPick !== want) setValue('material_pick', want)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [material, groups, materialPick, setValue])
+
+  // Cement on top of a trolley: its types (the "Cement" group), else any material named cement or sold by the bag.
+  const cementTypes = useMemo(() => {
+    const grouped = lookups.materials.filter((m) => /cement/i.test(m.group_name ?? ''))
+    if (grouped.length) return grouped
+    const one = lookups.materials.find((m) => /cement/i.test(m.name)) ?? lookups.materials.find((m) => m.unit === 'bag')
+    return one ? [one] : []
+  }, [lookups.materials])
+  const cement = cementTypes.find((m) => m.id === cementTypeId) ?? cementTypes[0]
   const canAddCement = vehicleType === 'tractor_trolley' && loose && Boolean(cement) && cement?.id !== materialId
 
   // Half loads and cement only make sense for loose material; drop them when they stop applying
@@ -249,6 +290,11 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
   const [vehicleId, driverId] = useWatch({ control, name: ['vehicle_id', 'driver_id'] })
   const setDriver = useCallback((id: number | null) => setValue('driver_id', id), [setValue])
   const driver = useVehicleDriver({ vehicleId, date, driverId, setDriver, editing })
+  const setTripPay = useCallback((v: string) => setValue('trip_pay', v), [setValue])
+  // Same rule as the server: each trolley/dumper/bucket load of loose material is a trip; bags or pieces are one.
+  // Until the material list loads, an edit uses the saved count so its saved trip pay is not recalculated.
+  const trips = !material && delivery ? delivery.trips : loose ? Math.max(1, Math.ceil(toNumber(qty))) : 1
+  const tripPay = useTripPay({ driverId, trips, setTripPay, editing })
 
   function changeVehicleType(t: VehicleType) {
     setVehicleType(t)
@@ -276,7 +322,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
     if (editing && editReasonError(editReason)) return
     setSaving(true)
     try {
-      const { with_cement, other_half_id, extra_qty, extra_rate, pay: payHow, paid_amount, money_account_id, ...rest } = values
+      const { with_cement, other_half_id, extra_qty, extra_rate, pay: payHow, paid_amount, money_account_id, material_pick: _pick, cement_type_id: _cementType, ...rest } = values
       const paid = editing || payHow === 'credit' ? 0 : payHow === 'full' ? total : toNumber(paid_amount)
       if (payHow === 'full' && !editing && total <= 0) {
         message.error('The challan total is zero, so there is nothing to receive. Enter the rate first.')
@@ -288,6 +334,8 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         site_id: values.site_id || null,
         vehicle_id: values.vehicle_id || null,
         driver_id: values.driver_id || null,
+        // blank with a driver means no trip pay; without a driver the server needs nothing
+        trip_pay: values.driver_id ? values.trip_pay || '0' : null,
         notes: values.notes || null,
         load_unit: loadUnit,
         load_size: loose ? values.load_size : 'full',
@@ -315,6 +363,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         setUdhaarOk(false)
         driver.release()
         reset(blank(last))
+        tripPay.refill()
         setTimeout(() => customerRef.current?.focus(), 50)
       }
       onSaved?.(data)
@@ -406,27 +455,51 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         </Col>
         <Col xs={12} sm={6} lg={4}>
           <Field control={control} name="driver_id" label="Driver" extra={driver.hint}>
-            {(f) => <EntitySelect id={f.id} options={driver.options} value={f.value} onChange={(v) => { driver.onPick(); f.onChange(v) }} />}
+            {(f) => <EntitySelect id={f.id} {...driver.selectProps} value={f.value} onChange={(v) => { driver.onPick(); f.onChange(v) }} />}
           </Field>
         </Col>
       </Row>
       <Row gutter={12}>
         <Col xs={24} sm={12} lg={6}>
-          <Field control={control} name="material_id" label="Material" required>
+          <Field control={control} name="material_pick" label="Material" required>
             {(f) => (
               <EntitySelect id={f.id}
-                options={optionsOf(lookups.materials, (m) => `${m.name} (${m.unit})`)}
+                options={materialOptions}
                 value={f.value}
                 allowClear={false}
                 placeholder="Type material"
                 onChange={(v) => {
                   f.onChange(v)
+                  // a group (negative) waits for its type; anything else is the material itself
+                  setValue('material_id', v !== null && v > 0 ? v : undefined, { shouldValidate: false })
+                  // Keyboard-first: go on to the Type. Deferred until this list has closed; focusing the new
+                  // field while it is still handling Enter leaves this list unable to take Enter later.
+                  if (v !== null && v < 0) setTimeout(() => typeRef.current?.focus(), 60)
                   rateTouched.current = editing
                 }}
               />
             )}
           </Field>
         </Col>
+        {pickedGroup && (
+          <Col xs={24} sm={12} lg={5}>
+            <Field control={control} name="material_id" label={`${pickedGroup.label} type`} required>
+              {(f) => (
+                <EntitySelect id={f.id}
+                  ref={typeRef}
+                  options={pickedGroup.types.map((m) => ({ value: m.id, label: `${m.name} · ${formatCurrency(m.default_sale_rate)}` }))}
+                  value={f.value}
+                  allowClear={false}
+                  placeholder="Pick the type"
+                  onChange={(v) => {
+                    f.onChange(v)
+                    rateTouched.current = editing
+                  }}
+                />
+              )}
+            </Field>
+          </Col>
+        )}
         <Col xs={12} sm={6} lg={3}>
           <Field control={control} name="qty" label={loose ? `${typeInfo.load[0].toUpperCase()}${typeInfo.load.slice(1)}s` : 'Qty'} required>
             {(f) => <QtyInput {...f} addonAfter={unitLabel} inputMode="decimal" />}
@@ -478,9 +551,33 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         <Col xs={12} sm={6} lg={5}>
           <Field control={control} name="freight_amount" label="Freight (bhara)">{(f) => <MoneyInput {...f} />}</Field>
         </Col>
+        {driverId && (
+          <Col xs={12} sm={6} lg={4}>
+            <Field control={control} name="trip_pay" label="Trip pay (driver)" extra={tripPay.rateNote}>
+              {(f) => <MoneyInput {...f} onChange={(v) => { tripPay.onType(); f.onChange(v) }} />}
+            </Field>
+          </Col>
+        )}
       </Row>
       {withCement && cement && (
         <Row gutter={12} className="challan-extra">
+          {cementTypes.length > 1 && (
+            <Col xs={24} sm={12} lg={5}>
+              <Field control={control} name="cement_type_id" label="Cement type" required>
+                {(f) => (
+                  <EntitySelect id={f.id}
+                    options={cementTypes.map((m) => ({ value: m.id, label: `${m.name} · ${formatCurrency(m.default_sale_rate)}` }))}
+                    value={cement.id}
+                    allowClear={false}
+                    onChange={(v) => {
+                      f.onChange(v)
+                      extraRateTouched.current = false
+                    }}
+                  />
+                )}
+              </Field>
+            </Col>
+          )}
           <Col xs={12} sm={6} lg={4}>
             <Field control={control} name="extra_qty" label={`${cement.name} (${cement.unit}s)`} required>
               {(f) => <QtyInput {...f} addonAfter={cement.unit} inputMode="numeric" />}
@@ -657,6 +754,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         onClose={() => setQuick(null)}
         onCreated={(s) => setValue('site_id', s.id, { shouldValidate: true })}
       />
+      {driver.modal}
     </Form>
   )
 }

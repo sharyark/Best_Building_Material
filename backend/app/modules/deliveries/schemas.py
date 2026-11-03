@@ -32,6 +32,8 @@ class DeliveryIn(EditableIn):
     extra_rate: PositiveMoney | None = None
     vehicle_id: int | None = None
     driver_id: int | None = None
+    # Driver's pay for this challan; omitted -> trips x the driver's usual trip rate (Masters > Staff).
+    trip_pay: MoneyIn | None = None
     notes: str | None = None
     # The UI asks "yard has only X, continue?"; confirming sends true.
     allow_negative_stock: bool = False
@@ -67,6 +69,8 @@ class DeliveryOut(EditInfoOut):
     extra_cost_amount: Decimal
     vehicle_id: int | None
     driver_id: int | None
+    trips: int
+    trip_pay: Decimal
     invoice_id: int | None
     receipt_id: int | None
     journal_id: int | None

@@ -61,6 +61,8 @@ export interface Material {
   default_sale_rate: Decimal
   default_purchase_rate: Decimal
   hsn_code: string | null
+  /** Types of one product (e.g. cement) share a group: the challan lists the group, then asks the type. */
+  group_name: string | null
   /** Stock (in `unit`) one full dumper / loader bucket holds; null = not sold that way. */
   dumper_qty: Decimal | null
   dumper_rate: Decimal | null
@@ -94,6 +96,8 @@ export interface Staff {
   role: StaffRole
   wage_type: WageType
   wage_amount: Decimal
+  /** Usual pay per trip, pre-filled on challans and own-vehicle purchases. */
+  trip_rate: Decimal
   default_vehicle_id: number | null
   account_id: number | null
   is_active: boolean
@@ -135,6 +139,8 @@ export interface Purchase extends DocBase {
   vehicle_id: number | null
   driver_id: number | null
   transport_by: 'own' | 'supplier'
+  trips: number
+  trip_pay: Decimal
   lines: PurchaseLine[]
 }
 export interface Delivery extends DocBase {
@@ -161,6 +167,8 @@ export interface Delivery extends DocBase {
   extra_cost_amount: Decimal
   vehicle_id: number | null
   driver_id: number | null
+  trips: number
+  trip_pay: Decimal
   invoice_id: number | null
   receipt_id: number | null
 }
@@ -173,6 +181,8 @@ export interface Rental extends DocBase {
   site_id: number | null
   vehicle_id: number
   operator_id: number | null
+  trips: number
+  trip_pay: Decimal
   basis: 'hour' | 'trip' | 'day'
   qty: Decimal
   rate: Decimal
@@ -187,11 +197,11 @@ export interface Payment extends DocBase {
   staff_id: number | null
   money_account_id: number
   mode: 'cash' | 'bank' | 'cheque' | 'online'
-  purpose: 'general' | 'advance' | 'salary'
+  purpose: 'general' | 'advance' | 'salary' | 'trip'
   ref_no: string | null
   amount: Decimal
 }
-export type ExpenseCategory = 'diesel' | 'repair' | 'tyre' | 'insurance' | 'toll' | 'office' | 'misc'
+export type ExpenseCategory = 'diesel' | 'food' | 'repair' | 'tyre' | 'insurance' | 'toll' | 'office' | 'misc'
 export interface Expense extends DocBase {
   voucher_no: string
   date: string
@@ -199,6 +209,8 @@ export interface Expense extends DocBase {
   vehicle_id: number | null
   amount: Decimal
   litres: Decimal | null
+  /** Fuel only: the pump's price; amount = litres x rate. */
+  rate_per_litre: Decimal | null
   meter_reading: Decimal | null
   paid_via: 'money_account' | 'party_credit'
   money_account_id: number | null
@@ -272,6 +284,12 @@ export interface SettlementPreview {
   wage_type: WageType
   days: Decimal
   trips: number
+  /** Already added to the khata trip by trip; not part of `gross`. */
+  trip_pay: Decimal
+  /** Absent = 1, half day = 0.5. */
+  absent_days: Decimal
+  /** Monthly pay / 30 (one day of chutti); null for daily or per-trip pay. */
+  day_rate: Decimal | null
   gross: Decimal
   accrues_on_settlement: boolean
   advances_in_period: Decimal
@@ -287,6 +305,7 @@ export interface Settlement {
   gross: Decimal
   advances_adjusted: Decimal
   deductions: Decimal
+  deduction_reason: string | null
   net_payable: Decimal
   status: 'active' | 'void'
   void_reason: string | null
@@ -384,6 +403,10 @@ export interface TrialBalance {
 export interface DriverSuggestion {
   driver_id: number | null
   source: 'today' | 'regular' | null
+  /** The vehicle's own driver is on duty: no one else may be picked. */
+  locked: boolean
+  /** Who may be picked: the own driver when locked, else free drivers (no vehicle of their own) not absent. */
+  allowed_driver_ids: number[]
   regular_driver_id: number | null
   regular_absent: boolean
   absent_driver_ids: number[]

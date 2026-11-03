@@ -44,6 +44,9 @@ class Material(Base, TimestampMixin):
     default_sale_rate: Mapped[Decimal] = mapped_column(Money, default=0)
     default_purchase_rate: Mapped[Decimal] = mapped_column(Money, default=0)
     hsn_code: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    # Types of one product (e.g. three kinds of cement) share a group: the challan lists the group once
+    # and then asks for the type. Each type keeps its own name, rates and yard stock.
+    group_name: Mapped[str | None] = mapped_column(String(50), nullable=True)
     # Loose material sold by the dumper or loader bucket: how much stock (in `unit`) one full load holds,
     # and the sale rate for one full load. Unset means the material can't be sold that way.
     dumper_qty: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
@@ -89,6 +92,8 @@ class Staff(Base, TimestampMixin):
     role: Mapped[str] = mapped_column(String(10))
     wage_type: Mapped[str] = mapped_column(String(10))
     wage_amount: Mapped[Decimal] = mapped_column(Money, default=0)
+    # Usual pay for one trip, pre-filled on each challan/purchase this person drives (the munshi can change it).
+    trip_rate: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     default_vehicle_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("vehicles.id"), nullable=True)
     account_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("accounts.id"), nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)

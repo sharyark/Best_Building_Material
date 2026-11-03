@@ -49,6 +49,7 @@ from app.modules.purchases import service as purchases
 from app.modules.purchases.schemas import PurchaseIn, PurchaseLineIn
 from app.modules.rentals import service as rentals
 from app.modules.rentals.schemas import RentalIn
+from app.modules.reports.queries import trip_money
 from app.modules.stock import service as stock
 from app.modules.stock.models import StockItem
 
@@ -58,7 +59,9 @@ MATERIALS = [  # name, unit, sale rate, purchase rate
     ("Rait (Sand)", "trolley", 3300, 2000),
     ("Bajri (Gravel)", "trolley", 4000, 2500),
     ("Crush", "trolley", 4600, 3000),
-    ("Cement", "bag", 1520, 1320),
+    ("Cement - OPC", "bag", 1520, 1320),  # three cement types, one "Cement" group on the challan
+    ("Cement - SRC", "bag", 1650, 1440),
+    ("Cement - White", "bag", 2800, 2450),
     ("Blocks", "piece", 92, 62),
 ]
 CUSTOMERS = [
@@ -72,7 +75,7 @@ CUSTOMERS = [
     ("City Infra Ltd", "0307-8889900", ["Ring road package 3"]),
 ]
 SUPPLIERS = [("Crusher X", ["Rait (Sand)", "Bajri (Gravel)", "Crush"]), ("Al-Fazal Bhatta", ["Blocks"]),
-             ("Bestway Cement Dealer", ["Cement"]), ("National Petrol Pump", [])]  # fmt: skip
+             ("Bestway Cement Dealer", ["Cement - OPC", "Cement - SRC", "Cement - White"]), ("National Petrol Pump", [])]  # fmt: skip
 
 
 def run(db) -> None:
@@ -95,6 +98,7 @@ def run(db) -> None:
                 unit=unit,
                 default_sale_rate=sale,
                 default_purchase_rate=buy,
+                group_name="Cement" if name.startswith("Cement") else None,
                 # loose material: one dumper ~ 3 trolleys, one loader bucket ~ a quarter trolley
                 **({"dumper_qty": Decimal(3), "bucket_qty": Decimal("0.25")} if unit == "trolley" else {}),
             ),
@@ -118,8 +122,17 @@ def run(db) -> None:
     fleet = [*trolleys, dumper]
     drivers = [
         masters.create_staff(
-            db, StaffIn(name=n, role="driver", wage_type="monthly", wage_amount=w, default_vehicle_id=v.id)
-        )
+            db,
+            StaffIn(
+                name=n,
+                role="driver",
+                wage_type="monthly",
+                wage_amount=w,
+                default_vehicle_id=v.id,
+                # tractor drivers also earn per trip; the dumper driver is on salary only
+                trip_rate=Decimal(200) if v.type == "tractor_trolley" else Decimal(0),
+            ),
+        )  # fmt: skip
         for (n, w), v in zip(
             [
                 ("Ali Raza", 22000),
@@ -154,7 +167,7 @@ def run(db) -> None:
                 ("staff", drivers[0].id, "dr", 5000)]  # fmt: skip
     for kind, ref, side, amount in openings:
         set_opening_balance(db, OpeningBalanceIn(date=cutover, kind=kind, ref_id=ref, side=side, amount=amount))
-    for name, qty, rate in (("Rait (Sand)", 40, 1900), ("Bajri (Gravel)", 25, 2400), ("Crush", 30, 2900), ("Cement", 600, 1300), ("Blocks", 4000, 60)):  # fmt: skip
+    for name, qty, rate in (("Rait (Sand)", 40, 1900), ("Bajri (Gravel)", 25, 2400), ("Crush", 30, 2900), ("Cement - OPC", 600, 1300), ("Cement - SRC", 150, 1420), ("Cement - White", 60, 2400), ("Blocks", 4000, 60)):  # fmt: skip
         stock.set_opening_stock(db, date=cutover, material_id=materials[name].id, qty=Decimal(qty), rate=Decimal(rate))
     db.commit()
 
@@ -182,13 +195,13 @@ def run(db) -> None:
         day = cutover + dt.timedelta(days=offset)
         if day.weekday() == 6 and rnd.random() < 0.7:  # most Sundays are off
             continue
-        for name, minimum, batch in (("Rait (Sand)", 12, 40), ("Bajri (Gravel)", 10, 30), ("Crush", 10, 30), ("Cement", 150, 400), ("Blocks", 1500, 3000)):  # fmt: skip
+        for name, minimum, batch in (("Rait (Sand)", 12, 40), ("Bajri (Gravel)", 10, 30), ("Crush", 10, 30), ("Cement - OPC", 150, 400), ("Blocks", 1500, 3000)):  # fmt: skip
             item = db.get(StockItem, materials[name].id)
             if item.qty_on_hand < minimum:
                 restock(day, name, batch)
         for _ in range(rnd.randint(5, 10)):
             cust = rnd.choice(customers)
-            name = rnd.choices(list(materials), weights=[34, 20, 18, 16, 12])[0]
+            name = rnd.choices(list(materials), weights=[34, 20, 18, 10, 4, 2, 12])[0]
             m = materials[name]
             qty = Decimal(rnd.choice([1, 1, 1, 2])) if m.unit == "trolley" else Decimal(rnd.choice([20, 40, 60] if m.unit == "bag" else [200, 400, 500]))  # fmt: skip
             veh = rnd.choice(fleet)
@@ -199,7 +212,9 @@ def run(db) -> None:
             if load_unit:
                 qty = Decimal(1)
             # some sand trolleys also carry cement bags on top
-            extra = materials["Cement"] if name == "Rait (Sand)" and not load_unit and rnd.random() < 0.2 else None
+            extra = (
+                materials["Cement - OPC"] if name == "Rait (Sand)" and not load_unit and rnd.random() < 0.2 else None
+            )
             extra_qty = Decimal(10) if extra else None
             # a half trolley is often shared: half one material, half another
             if half and not load_unit and rnd.random() < 0.5:
@@ -249,6 +264,11 @@ def run(db) -> None:
                 date=day, category=rnd.choice(["repair", "tyre", "toll", "office"]), vehicle_id=rnd.choice(fleet).id,
                 amount=Decimal(rnd.randint(8, 60) * 100), paid_via="money_account", money_account_id=cash.id,
             ))  # fmt: skip
+        # nightly khana for the drivers and labour, paid from the galla (no rnd, so the rest of the demo stays put)
+        expenses.create(db, ExpenseIn(
+            date=day, category="food", amount=Decimal(900 + (offset % 4) * 150), paid_via="money_account",
+            money_account_id=cash.id, notes="Raat ka khana",
+        ))  # fmt: skip
         labour.save_attendance(db, [
             AttendanceIn(date=day, staff_id=w.id, status=rnd.choices(["present", "half", "absent"], [88, 6, 6])[0],
                          overtime_hours=Decimal(rnd.choice([0, 0, 0, 2])), vehicle_id=None)
@@ -293,6 +313,13 @@ def run(db) -> None:
                         date=day, direction="out", staff_id=w.id, purpose="salary", mode="cash",
                         money_account_id=cash.id, amount=due,
                     ))  # fmt: skip
+            for d in drivers:  # and drivers get the week's trip money, apart from their salary
+                trip_due = trip_money(db, d, day, day)["balance"]
+                if trip_due > 0:
+                    payments.create(db, PaymentIn(
+                        date=day, direction="out", staff_id=d.id, purpose="trip", mode="cash",
+                        money_account_id=cash.id, amount=trip_due,
+                    ))  # fmt: skip
         if (day + dt.timedelta(days=1)).day == 1:
             month_ends.add(day)
         db.commit()
@@ -313,7 +340,8 @@ def run(db) -> None:
             labour.create_settlement(db, SettlementIn(staff_id=s.id, period_from=max(start, cutover), period_to=end))
     for end in sorted(month_ends):  # salaries are paid from the bank once settled
         for s in [*drivers, *operators, helper]:
-            due = -balance_of(db, s.account_id)
+            # trip money is paid weekly on its own, so it is not part of the salary payout
+            due = -balance_of(db, s.account_id) - trip_money(db, s, today, today)["balance"]
             if due > 0:
                 payments.create(db, PaymentIn(
                     date=end, direction="out", staff_id=s.id, purpose="salary", mode="bank",
@@ -334,6 +362,7 @@ def run(db) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--reset", action="store_true", help="drop and recreate all tables first (dev only)")
+    parser.add_argument("--small", action="store_true", help="one of everything and one week, to learn the app")
     args = parser.parse_args()
     if get_settings().env == "prod":
         raise SystemExit("Refusing to seed demo data with ENV=prod")
@@ -357,13 +386,20 @@ def main() -> None:
         bootstrap(db)
         if db.scalar(select(func.count()).select_from(Staff)) or db.scalar(select(func.count()).select_from(Vehicle)):
             raise SystemExit("Database already has data. Use --reset on a dev database.")
-        run(db)
+        if args.small:
+            from app.seed_small import run_small
+
+            run_small(db)
+        else:
+            run(db)
         from app.accounting.service import trial_balance
 
         tb = trial_balance(db, None)
         inv = db.scalar(select(Account.id).where(Account.code == "1100"))
         stock_value = db.scalar(select(func.sum(StockItem.value))) or 0
-        print(f"Seeded {DAYS} days. Trial balance balanced: {tb.balanced} (Dr {tb.total_debit} = Cr {tb.total_credit})")
+        print(
+            f"Seeded {6 if args.small else DAYS} days. Trial balance balanced: {tb.balanced} (Dr {tb.total_debit} = Cr {tb.total_credit})"
+        )
         print(f"Inventory ledger {balance_of(db, inv)} == stock value {stock_value}")
         print(
             f"Materials: {db.scalar(select(func.count()).select_from(Material))}; logins: admin/admin12345, munshi/munshi12345"

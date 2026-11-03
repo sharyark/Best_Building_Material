@@ -17,7 +17,7 @@ const page = <T,>(items: T[]) => ({ items, total: items.length, page: 1, size: 5
 const delivery: Delivery = {
   id: 7, challan_no: 'CH/2026-27/00007', date: '2026-10-17', customer_id: 1, site_id: null, material_id: 2, qty: '5.000', unit: 'trolley',
   sale_rate: '3000.00', sale_amount: '15000.00', freight_amount: '0.00', cost_rate: '2000.0000', cost_amount: '10000.00',
-  vehicle_id: null, driver_id: null, invoice_id: null, journal_id: 1, status: 'active', void_reason: null, notes: null,
+  vehicle_id: null, driver_id: null, trips: 1, trip_pay: '0.00', invoice_id: null, journal_id: 1, status: 'active', void_reason: null, notes: null,
   load_unit: null, load_size: 'full', stock_qty: '5.000', extra_material_id: null, extra_qty: null, extra_unit: null,
   extra_rate: null, extra_amount: '0.00', extra_cost_amount: '0.00', receipt_id: null,
 }

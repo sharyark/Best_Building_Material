@@ -9,7 +9,7 @@ function greeting(): string {
   return h < 12 ? 'Good morning' : h < 17 ? 'Good afternoon' : 'Good evening'
 }
 
-export function HeroBanner({ date, trips }: { date?: string; trips?: number }) {
+export function HeroBanner({ date, trips, isToday = true }: { date?: string; trips?: number; isToday?: boolean }) {
   const { user, can } = useAuth()
   const navigate = useNavigate()
   return (
@@ -33,7 +33,7 @@ export function HeroBanner({ date, trips }: { date?: string; trips?: number }) {
         </Typography.Title>
         <Typography.Text style={{ color: 'rgba(255,255,255,.85)' }}>
           {date ? formatDate(date) : ''}
-          {trips !== undefined && ` · ${trips} trip${trips === 1 ? '' : 's'} out of the yard today`}
+          {trips !== undefined && ` · ${trips} trip${trips === 1 ? '' : 's'} out of the yard${isToday ? ' today' : ''}`}
         </Typography.Text>
         <div style={{ marginTop: 16 }}>
           <Space wrap>
@@ -50,6 +50,11 @@ export function HeroBanner({ date, trips }: { date?: string; trips?: number }) {
             {can('expense.create') && (
               <Button ghost style={{ color: '#fff', borderColor: 'rgba(255,255,255,.7)' }} onClick={() => navigate('/expenses')}>
                 Diesel / expense
+              </Button>
+            )}
+            {can('expense.create') && (
+              <Button ghost style={{ color: '#fff', borderColor: 'rgba(255,255,255,.7)' }} onClick={() => navigate('/expenses?new=food')}>
+                Khana (food)
               </Button>
             )}
           </Space>

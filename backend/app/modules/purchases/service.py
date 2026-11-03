@@ -1,3 +1,6 @@
+import math
+from decimal import Decimal
+
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session, selectinload
 
@@ -9,13 +12,14 @@ from app.core.errors import NotFound
 from app.core.money import money
 from app.core.pagination import ListParams, apply_sort, paginate
 from app.modules.common import ensure_active, find_by_client_ref, get_or_404, mark_edited, mark_void
+from app.modules.masters import service as masters
 from app.modules.masters.models import Material, Party, Staff, Vehicle
 from app.modules.purchases.models import Purchase, PurchaseLine
 from app.modules.purchases.schemas import PurchaseIn
 from app.modules.stock import service as stock
 
 
-def _validate(db: Session, data: PurchaseIn) -> Party:
+def _validate(db: Session, data: PurchaseIn, saved: Purchase | None = None) -> Party:
     supplier = db.get(Party, data.supplier_id)
     if supplier is None or supplier.type == "customer":
         raise NotFound("Supplier not found")
@@ -23,10 +27,18 @@ def _validate(db: Session, data: PurchaseIn) -> Party:
         raise NotFound("Vehicle not found")
     if data.driver_id and not db.get(Staff, data.driver_id):
         raise NotFound("Driver not found")
+    if saved is None or (saved.vehicle_id, saved.driver_id) != (data.vehicle_id, data.driver_id):
+        masters.ensure_driver_allowed(db, data.vehicle_id, data.driver_id, data.date)
     for line in data.lines:
         if db.get(Material, line.material_id) is None:
             raise NotFound(f"Material {line.material_id} not found")
     return supplier
+
+
+def _trips(db: Session, data: PurchaseIn) -> int:
+    """Our vehicle bringing 2 trolleys of sand = 2 trips; bags or pieces = 1 trip."""
+    trolleys = sum((ln.qty for ln in data.lines if db.get(Material, ln.material_id).unit == "trolley"), Decimal(0))
+    return max(1, math.ceil(trolleys))
 
 
 def _apply(db: Session, purchase: Purchase, data: PurchaseIn, supplier: Party) -> None:
@@ -37,6 +49,11 @@ def _apply(db: Session, purchase: Purchase, data: PurchaseIn, supplier: Party) -
     purchase.vehicle_id = data.vehicle_id
     purchase.driver_id = data.driver_id
     purchase.transport_by = data.transport_by
+    own_driver = data.driver_id if data.transport_by == "own" else None
+    purchase.trips = _trips(db, data)
+    purchase.trip_pay, driver_account = masters.trip_pay_for(
+        db, own_driver, data.trip_pay if data.transport_by == "own" else None, purchase.trips
+    )
     purchase.notes = data.notes
     purchase.lines = [
         PurchaseLine(material_id=ln.material_id, qty=ln.qty, rate=ln.rate, amount=money(ln.qty * ln.rate))
@@ -55,7 +72,8 @@ def _apply(db: Session, purchase: Purchase, data: PurchaseIn, supplier: Party) -
         source_type="purchase",
         source_id=purchase.id,
         narration=f"Purchase {purchase.bill_no} from {supplier.name}",
-        lines=rules.purchase(Chart(db), supplier.account_id, purchase.total),
+        lines=rules.purchase(Chart(db), supplier.account_id, purchase.total)
+        + rules.trip_pay(Chart(db), driver_account, purchase.trip_pay, purchase.vehicle_id),
     )
     purchase.journal_id = entry.id
 
@@ -82,7 +100,7 @@ def update(db: Session, purchase_id: int, data: PurchaseIn) -> Purchase:
     ensure_active(purchase)
     # Before any other check, so a missing reason is the first thing the munshi is told.
     mark_edited(db, purchase, data.edit_reason)
-    supplier = _validate(db, data)
+    supplier = _validate(db, data, purchase)
     ensure_period_open(db, purchase.date, data.date)
     _undo(db, purchase)
     _apply(db, purchase, data, supplier)

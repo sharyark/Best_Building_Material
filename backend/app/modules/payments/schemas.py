@@ -16,8 +16,9 @@ class PaymentIn(EditableIn):
     staff_id: int | None = None
     money_account_id: int
     mode: Literal["cash", "bank", "cheque", "online"]
-    # Staff payments: 'advance' (loan against future wages) or 'salary' (pay-out of earned wages).
-    purpose: Literal["general", "advance", "salary"] = "general"
+    # Staff payments: 'advance' (loan against future wages), 'salary' (pay-out of earned wages) or
+    # 'trip' (pay-out of trip money, kept apart so the salary side of the khata is untouched).
+    purpose: Literal["general", "advance", "salary", "trip"] = "general"
     ref_no: str | None = None
     amount: PositiveMoney
     notes: str | None = None
@@ -28,7 +29,7 @@ class PaymentIn(EditableIn):
         if (self.party_id is None) == (self.staff_id is None):
             raise ValueError("Give exactly one of party_id or staff_id")
         if self.purpose != "general" and self.staff_id is None:
-            raise ValueError("advance/salary payments are for staff")
+            raise ValueError("advance, salary and trip payments are for staff")
         return self
 
 

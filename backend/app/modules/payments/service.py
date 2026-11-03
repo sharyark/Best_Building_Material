@@ -11,6 +11,9 @@ from app.modules.masters.models import MoneyAccount, Party, Staff
 from app.modules.payments.models import Payment
 from app.modules.payments.schemas import PaymentIn
 
+# Shown in the staff khata so a trip payout is not mistaken for salary.
+PURPOSE_LABEL = {"advance": "advance", "salary": "salary", "trip": "trip money"}
+
 
 def _counterparty(db: Session, data: PaymentIn) -> tuple[int, str]:
     """Returns (ledger account id, display name) of the party or staff member."""
@@ -43,12 +46,13 @@ def _apply(db: Session, p: Payment, data: PaymentIn) -> None:
     db.flush()
     rule = rules.payment_in if data.direction == "in" else rules.payment_out
     label = "received from" if data.direction == "in" else "paid to"
+    what = PURPOSE_LABEL.get(data.purpose)
     entry = post(
         db,
         date=data.date,
         source_type="payment",
         source_id=p.id,
-        narration=f"{p.voucher_no}: {data.amount:,.2f} {label} {name} ({data.mode})",
+        narration=f"{p.voucher_no}: {data.amount:,.2f} {label} {name} ({data.mode})" + (f", {what}" if what else ""),
         lines=rule(money_account.account_id, counterparty_account, data.amount),
     )
     p.journal_id = entry.id

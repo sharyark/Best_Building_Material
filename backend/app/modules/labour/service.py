@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.accounting import rules
@@ -10,7 +10,7 @@ from app.accounting.chart import Chart, Code
 from app.accounting.posting import ensure_period_open, post, reverse
 from app.core.config import get_settings
 from app.core.db import ZERO
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, DomainError, NotFound
 from app.core.money import money
 from app.core.money import qty as q3
 from app.modules.common import ensure_active, find_by_client_ref, get_or_404, mark_void
@@ -20,6 +20,7 @@ from app.modules.labour.schemas import AttendanceIn, SettlementIn, SettlementPre
 from app.modules.masters.models import Site, Staff, Vehicle
 from app.modules.payments.models import Payment
 from app.modules.purchases.models import Purchase
+from app.modules.rentals.models import Rental
 
 DAY_FACTOR = {"present": Decimal("1"), "half": Decimal("0.5"), "absent": Decimal("0")}
 
@@ -98,37 +99,31 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
         )
     ).all()
     days = q3(sum((DAY_FACTOR[a.status] for a in rows), ZERO))
-    trips = (
-        db.scalar(
-            select(func.count())
-            .select_from(Delivery)
-            .where(
-                Delivery.driver_id == staff_id,
-                Delivery.status == "active",
-                Delivery.date >= period_from,
-                Delivery.date <= period_to,
-            )
-        )
-        or 0
-    )
-    trips += (
-        db.scalar(
-            select(func.count())
-            .select_from(Purchase)
-            .where(
-                Purchase.driver_id == staff_id,
-                Purchase.transport_by == "own",
-                Purchase.status == "active",
-                Purchase.date >= period_from,
-                Purchase.date <= period_to,
-            )
-        )
-        or 0
-    )
+    absent_days = q3(sum((1 - DAY_FACTOR[a.status] for a in rows), ZERO))
+    # A document can be several trips (2 trolleys = 2 trips), saved on it as `trips`.
+    trip_docs = [
+        (Delivery, Delivery.trips, [Delivery.driver_id == staff_id]),
+        (Purchase, Purchase.trips, [Purchase.driver_id == staff_id, Purchase.transport_by == "own"]),
+        (Rental, Rental.trips, [Rental.operator_id == staff_id]),
+    ]
+    trips = unpaid_trips = 0
+    trip_pay = ZERO
+    for model, per_doc, where in trip_docs:
+        count, unpaid, paid = db.execute(
+            select(
+                func.coalesce(func.sum(per_doc), 0),
+                func.coalesce(func.sum(case((model.trip_pay == 0, per_doc), else_=0)), 0),
+                func.coalesce(func.sum(model.trip_pay), 0),
+            ).where(*where, model.status == "active", model.date >= period_from, model.date <= period_to)
+        ).one()
+        trips += count
+        unpaid_trips += unpaid
+        trip_pay += Decimal(paid)
     if staff.wage_type == "monthly":
         gross = money(staff.wage_amount)
     elif staff.wage_type == "per_trip":
-        gross = money(staff.wage_amount * trips)
+        # Trips that carried trip pay are already in the khata; only older trips without it are paid here.
+        gross = money(staff.wage_amount * unpaid_trips)
     else:
         gross = money(sum((daily_wage(staff, a.status, a.overtime_hours) for a in rows), ZERO))
     advances = db.scalar(
@@ -148,6 +143,10 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
         wage_type=staff.wage_type,
         days=days,
         trips=trips,
+        trip_pay=money(trip_pay),
+        absent_days=absent_days,
+        # 30 days a month whatever the month, the usual way a monthly salary is cut per day
+        day_rate=money(staff.wage_amount / 30) if staff.wage_type == "monthly" else None,
         gross=gross,
         accrues_on_settlement=staff.wage_type != "daily",
         advances_in_period=money(advances or 0),
@@ -160,9 +159,15 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
         return existing, False
     if data.period_to < data.period_from:
         raise Conflict("Period end is before its start", code="BAD_PERIOD")
+    reason = (data.deduction_reason or "").strip() or None
+    if data.deductions > 0 and reason is None:
+        raise DomainError(
+            "Write why the pay is cut (e.g. Chutti: 2 din), so it shows in the worker's khata.",
+            code="DEDUCTION_REASON_REQUIRED",
+        )
     staff = get_or_404(db, Staff, data.staff_id, "Staff")
     overlap = db.scalar(
-        select(WageSettlement.id).where(
+        select(WageSettlement).where(
             WageSettlement.staff_id == data.staff_id,
             WageSettlement.status == "active",
             WageSettlement.period_from <= data.period_to,
@@ -170,10 +175,16 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
         )
     )
     if overlap:
-        raise Conflict("An active settlement already covers part of this period", code="PERIOD_OVERLAP")
+        raise Conflict(
+            f"{staff.name} is already settled for {overlap.period_from:%d-%m-%Y} to {overlap.period_to:%d-%m-%Y}. "
+            f"Choose dates after {overlap.period_to:%d-%m-%Y}. An advance or payment given later does not need a "
+            "new settlement: enter it in Payments. To redo this one, the owner voids it first.",
+            code="PERIOD_OVERLAP",
+            details={"settlement_id": overlap.id},
+        )
     ensure_period_open(db, data.period_to)
     pv = preview(db, data.staff_id, data.period_from, data.period_to)
-    advances = data.advances_adjusted if data.advances_adjusted is not None else pv.advances_in_period
+    advances = pv.advances_in_period
     settlement = WageSettlement(
         staff_id=staff.id,
         period_from=data.period_from,
@@ -183,6 +194,7 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
         gross=pv.gross,
         advances_adjusted=advances,
         deductions=data.deductions,
+        deduction_reason=reason if data.deductions > 0 else None,
         net_payable=money(pv.gross - advances - data.deductions),
         notes=data.notes,
         client_ref=data.client_ref,
@@ -203,7 +215,8 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
             date=data.period_to,
             source_type="wage_settlement",
             source_id=settlement.id,
-            narration=f"Wage settlement {staff.name} {data.period_from:%d-%m-%Y} to {data.period_to:%d-%m-%Y}",
+            narration=f"Wage settlement {staff.name} {data.period_from:%d-%m-%Y} to {data.period_to:%d-%m-%Y}"
+            + (f"; katoti {data.deductions:,.2f}: {reason}" if data.deductions > 0 else ""),
             lines=lines,
         )
         settlement.journal_id = entry.id

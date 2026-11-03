@@ -53,6 +53,7 @@ def update_party(db: Session, party: Party, changes: dict) -> Party:
 
 def create_staff(db: Session, data: StaffIn) -> Staff:
     staff = Staff(**data.model_dump())
+    _ensure_vehicle_free(db, staff)
     db.add(staff)
     db.flush()
     account = create_sub_account(
@@ -65,6 +66,7 @@ def create_staff(db: Session, data: StaffIn) -> Staff:
 def update_staff(db: Session, staff: Staff, changes: dict) -> Staff:
     for key, value in changes.items():
         setattr(staff, key, value)
+    _ensure_vehicle_free(db, staff)
     if "name" in changes and staff.account_id:
         db.get(Account, staff.account_id).name = staff.name
     db.flush()
@@ -202,33 +204,126 @@ def attach_balances(db: Session, rows: list, out_items: list) -> None:
 DRIVING_ROLES = ("driver", "operator")
 
 
-def suggest_driver(db: Session, vehicle_id: int, on: dt.date) -> DriverSuggestion:
-    """Driver for a vehicle on a day: a substitute already used that day wins, else the regular driver.
+def _ensure_vehicle_free(db: Session, staff: Staff) -> None:
+    """One driver per vehicle: the link is set only here in Masters, and documents follow it."""
+    # is_active is still None on a new, unflushed row (the column default applies on insert).
+    if not (staff.default_vehicle_id and staff.is_active is not False and staff.role in DRIVING_ROLES):
+        return
+    query = select(Staff).where(
+        Staff.default_vehicle_id == staff.default_vehicle_id, Staff.is_active, Staff.role.in_(DRIVING_ROLES)
+    )
+    if staff.id is not None:
+        query = query.where(Staff.id != staff.id)
+    other = db.scalars(query.limit(1)).first()
+    if other is not None:
+        vehicle = db.get(Vehicle, staff.default_vehicle_id)
+        raise Conflict(
+            f"{vehicle.name if vehicle else 'This vehicle'} already has driver {other.name}. "
+            f"Remove {other.name} from it first.",
+            code="VEHICLE_HAS_DRIVER",
+            details={"vehicle_id": staff.default_vehicle_id, "driver_id": other.id},
+        )
 
-    A driver marked absent in attendance is never suggested; the form then asks the munshi to pick one,
-    and that pick becomes "today's" driver for the vehicle's next entries without any extra step.
-    """
-    # Imported here: these modules import masters models, so a top-level import would be circular.
-    from app.modules.deliveries.models import Delivery
+
+def _regular_driver(db: Session, vehicle_id: int) -> int | None:
+    return db.scalar(
+        select(Staff.id)
+        .where(Staff.default_vehicle_id == vehicle_id, Staff.is_active, Staff.role.in_(DRIVING_ROLES))
+        .order_by(Staff.id)
+        .limit(1)
+    )
+
+
+def _free_drivers(db: Session) -> list[int]:
+    """Active drivers not tied to any active vehicle: the only ones who may stand in on another vehicle."""
+    return list(
+        db.scalars(
+            select(Staff.id)
+            .outerjoin(Vehicle, Vehicle.id == Staff.default_vehicle_id)
+            .where(Staff.is_active, Staff.role.in_(DRIVING_ROLES))
+            .where((Staff.default_vehicle_id.is_(None)) | (Vehicle.is_active.is_(False)))
+            .order_by(Staff.name)
+        )
+    )
+
+
+def _absent_drivers(db: Session, on: dt.date) -> set[int]:
     from app.modules.labour.models import Attendance
-    from app.modules.purchases.models import Purchase
-    from app.modules.rentals.models import Rental
 
-    if db.get(Vehicle, vehicle_id) is None:
-        raise NotFound("Vehicle not found")
-    absent = set(
+    return set(
         db.scalars(
             select(Attendance.staff_id)
             .join(Staff, Staff.id == Attendance.staff_id)
             .where(Attendance.date == on, Attendance.status == "absent", Staff.role.in_(DRIVING_ROLES))
         )
     )
-    regular = db.scalar(
-        select(Staff.id)
-        .where(Staff.default_vehicle_id == vehicle_id, Staff.is_active, Staff.role.in_(DRIVING_ROLES))
-        .order_by(Staff.id)
-    )
 
+
+def usual_trip_rate(staff: Staff) -> Decimal:
+    if staff.trip_rate:
+        return staff.trip_rate
+    return staff.wage_amount if staff.wage_type == "per_trip" else Decimal("0")
+
+
+def trip_pay_for(
+    db: Session, driver_id: int | None, given: Decimal | None, trips: int = 1
+) -> tuple[Decimal, int | None]:
+    """(amount, driver's ledger account). `given` None means trips x the driver's usual rate."""
+    if driver_id is None:
+        if given:
+            raise DomainError("Pick the driver to give trip money to.", code="TRIP_PAY_NEEDS_DRIVER")
+        return money(0), None
+    staff = db.get(Staff, driver_id)
+    if staff is None:
+        raise NotFound("Driver not found")
+    return money(given if given is not None else usual_trip_rate(staff) * trips), staff.account_id
+
+
+def ensure_driver_allowed(db: Session, vehicle_id: int | None, driver_id: int | None, on: dt.date) -> None:
+    """A vehicle with its own driver takes only that driver, unless he is absent that day; otherwise a
+    free driver (one not linked to any vehicle). Services skip this when an edit keeps the saved pair."""
+    if not vehicle_id or not driver_id:
+        return
+    regular = _regular_driver(db, vehicle_id)
+    if driver_id == regular:
+        return
+    if regular is not None and regular not in _absent_drivers(db, on):
+        name = db.get(Staff, regular).name
+        raise DomainError(
+            f"This vehicle's driver is {name}. To use someone else, change the driver in Masters first.",
+            code="DRIVER_NOT_ALLOWED",
+            details={"regular_driver_id": regular},
+        )
+    if driver_id not in _free_drivers(db):
+        raise DomainError(
+            "This driver is linked to another vehicle. Pick a free driver (one not linked to any vehicle).",
+            code="DRIVER_NOT_ALLOWED",
+        )
+
+
+def suggest_driver(db: Session, vehicle_id: int, on: dt.date) -> DriverSuggestion:
+    """Driver for a vehicle on a day, and who else may be picked.
+
+    The vehicle's own driver is fixed. Only when it has none, or he is marked absent, may a free driver be
+    picked; that pick then becomes "today's" driver for the vehicle's next entries without any extra step.
+    """
+    # Imported here: these modules import masters models, so a top-level import would be circular.
+    from app.modules.deliveries.models import Delivery
+    from app.modules.purchases.models import Purchase
+    from app.modules.rentals.models import Rental
+
+    if db.get(Vehicle, vehicle_id) is None:
+        raise NotFound("Vehicle not found")
+    absent = _absent_drivers(db, on)
+    regular = _regular_driver(db, vehicle_id)
+    regular_absent = regular is not None and regular in absent
+    if regular is not None and not regular_absent:
+        return DriverSuggestion(
+            driver_id=regular, source="regular", locked=True, allowed_driver_ids=[regular],
+            regular_driver_id=regular, regular_absent=False, absent_driver_ids=sorted(absent),
+        )  # fmt: skip
+
+    allowed = [d for d in _free_drivers(db) if d not in absent]
     latest: tuple[dt.datetime, int] | None = None
     for model, column in ((Delivery, Delivery.driver_id), (Purchase, Purchase.driver_id), (Rental, Rental.operator_id)):
         row = db.execute(
@@ -239,16 +334,13 @@ def suggest_driver(db: Session, vehicle_id: int, on: dt.date) -> DriverSuggestio
         ).first()
         if row and (latest is None or row[0] > latest[0]):
             latest = (row[0], row[1])
-
-    driver_id, source = None, None
-    if latest and latest[1] not in absent:
-        driver_id, source = latest[1], "today"
-    elif regular and regular not in absent:
-        driver_id, source = regular, "regular"
+    today = latest[1] if latest and latest[1] in allowed else None
     return DriverSuggestion(
-        driver_id=driver_id,
-        source=source,
+        driver_id=today,
+        source="today" if today else None,
+        locked=False,
+        allowed_driver_ids=allowed,
         regular_driver_id=regular,
-        regular_absent=regular is not None and regular in absent,
+        regular_absent=regular_absent,
         absent_driver_ids=sorted(absent),
     )

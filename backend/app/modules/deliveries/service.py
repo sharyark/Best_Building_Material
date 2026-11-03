@@ -1,3 +1,4 @@
+import math
 from decimal import Decimal
 
 from sqlalchemy import select
@@ -22,11 +23,13 @@ from app.modules.payments.schemas import PaymentIn
 from app.modules.stock import service as stock
 
 HALF = Decimal("0.5")
+# Loads that are one trip each for the driver/operator: trolley, dumper load, loader bucket.
+TRIP_LOADS = {"trolley", "dumper", "bucket"}
 # Units that mean "one vehicle load", so a half load makes sense.
 LOAD_UNITS = {"trolley", "dumper", "bucket"}
 
 
-def _validate(db: Session, data: DeliveryIn) -> tuple[Party, Material, Material | None]:
+def _validate(db: Session, data: DeliveryIn, saved: Delivery | None = None) -> tuple[Party, Material, Material | None]:
     customer = db.get(Party, data.customer_id)
     if customer is None or customer.type == "supplier":
         raise NotFound("Customer not found")
@@ -55,7 +58,16 @@ def _validate(db: Session, data: DeliveryIn) -> tuple[Party, Material, Material 
         raise NotFound("Vehicle not found")
     if data.driver_id and not db.get(Staff, data.driver_id):
         raise NotFound("Driver not found")
+    if saved is None or (saved.vehicle_id, saved.driver_id) != (data.vehicle_id, data.driver_id):
+        masters.ensure_driver_allowed(db, data.vehicle_id, data.driver_id, data.date)
     return customer, material, extra
+
+
+def trips_of(data: DeliveryIn, material: Material) -> int:
+    """2 trolleys / dumpers / buckets of sand = 2 trips (a half load is still one); bags or pieces = 1 trip."""
+    if (data.load_unit or material.unit) in TRIP_LOADS:
+        return max(1, math.ceil(data.qty))
+    return 1
 
 
 def _ensure_not_invoiced(delivery: Delivery) -> None:
@@ -82,6 +94,8 @@ def _apply(
     d.freight_amount = data.freight_amount
     d.vehicle_id = data.vehicle_id
     d.driver_id = data.driver_id
+    d.trips = trips_of(data, material)
+    d.trip_pay, driver_account = masters.trip_pay_for(db, data.driver_id, data.trip_pay, d.trips)
     d.notes = data.notes
     db.flush()
     _, cost_rate, cost_amount = stock.issue(
@@ -114,7 +128,7 @@ def _apply(
         lines=rules.delivery(
             Chart(db), customer.account_id, sale=d.sale_amount + d.extra_amount, freight=d.freight_amount,
             cost=d.cost_amount + d.extra_cost_amount, vehicle_id=d.vehicle_id,
-        ),
+        ) + rules.trip_pay(Chart(db), driver_account, d.trip_pay, d.vehicle_id),
     )  # fmt: skip
     d.journal_id = entry.id
 
@@ -155,7 +169,7 @@ def update(db: Session, delivery_id: int, data: DeliveryIn) -> Delivery:
     # Before any other check, so a missing reason is the first thing the munshi is told.
     mark_edited(db, d, data.edit_reason)
     _ensure_not_invoiced(d)
-    customer, material, extra = _validate(db, data)
+    customer, material, extra = _validate(db, data, d)
     ensure_period_open(db, d.date, data.date)
     _undo(db, d)
     _apply(db, d, data, customer, material, extra)

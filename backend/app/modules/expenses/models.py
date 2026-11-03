@@ -18,6 +18,8 @@ class Expense(Base, TimestampMixin, TxnMixin):
     vehicle_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("vehicles.id"), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Money)
     litres: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
+    # Fuel: the pump's price per litre; amount is then litres x rate.
+    rate_per_litre: Mapped[Decimal | None] = mapped_column(Money, nullable=True)
     meter_reading: Mapped[Decimal | None] = mapped_column(Qty, nullable=True)
     paid_via: Mapped[str] = mapped_column(String(15))  # money_account | party_credit
     money_account_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("money_accounts.id"), nullable=True)

@@ -4,7 +4,7 @@ import datetime as dt
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.accounting.balances import account_balances, oldest_unpaid_dates
@@ -15,6 +15,7 @@ from app.core.db import ZERO
 from app.core.errors import DomainError, NotFound
 from app.core.money import money, qty
 from app.modules.deliveries.models import Delivery
+from app.modules.expenses.models import Expense
 from app.modules.labour.models import Attendance, WageSettlement
 from app.modules.masters.models import Material, MoneyAccount, Party, Site, Staff, Vehicle
 from app.modules.payments.models import Payment
@@ -54,10 +55,25 @@ def _range_label(date_from: dt.date, date_to: dt.date) -> str:
 # ---------------------------------------------------------------------------------------------------
 # Khata / ledger statements
 # ---------------------------------------------------------------------------------------------------
+# Shop-floor words for the two sides of a khata, by whose khata it is (no debit/credit on screen).
+SIDES = {
+    "customer": ("Bill", "Wasool"),  # what they bought / what we received
+    "supplier": ("Pay", "Bill"),  # what we paid / what we bought on their bill
+    "both": ("Bill / Pay", "Wasool / Bill"),
+    "staff": ("Pay", "Kamai"),  # what we paid or advanced / what they earned
+}
+
+
 def ledger(
-    db: Session, account_id: int, title: str, date_from: dt.date, date_to: dt.date, subtitle: str | None = None
+    db: Session,
+    account_id: int,
+    title: str,
+    date_from: dt.date,
+    date_to: dt.date,
+    subtitle: str | None = None,
+    sides: tuple[str, str] = ("Bill", "Wasool"),
 ) -> ReportTable:
-    """Date-wise Dr/Cr with a running balance computed by a window function (debit-positive)."""
+    """Date-wise entries with a running balance computed by a window function (debit-positive: + = lena)."""
     running = (
         func.sum(JournalLine.debit - JournalLine.credit)
         .over(order_by=[JournalEntry.date, JournalEntry.id, JournalLine.id])
@@ -107,12 +123,12 @@ def ledger(
             Col("date", "Date", "date"),
             Col("type", "Type"),
             Col("narration", "Details"),
-            Col("debit", "Debit", "money"),
-            Col("credit", "Credit", "money"),
-            Col("balance", "Balance", "drcr"),
+            Col("debit", sides[0], "money"),
+            Col("credit", sides[1], "money"),
+            Col("balance", "Baqaya", "drcr"),
         ],
         rows=rows,
-        totals={"narration": "Total / Closing", "debit": total_dr, "credit": total_cr, "balance": closing},
+        totals={"narration": "Kul / aakhri baqaya", "debit": total_dr, "credit": total_cr, "balance": closing},
         meta={"opening": opening, "closing": closing},
     )
 
@@ -122,7 +138,7 @@ def party_khata(db: Session, party_id: int, date_from: dt.date, date_to: dt.date
     if party is None:
         raise NotFound("Party not found")
     kind = "Supplier" if party.type == "supplier" else "Customer"
-    table = ledger(db, party.account_id, f"{kind} khata - {party.name}", date_from, date_to)
+    table = ledger(db, party.account_id, f"{kind} khata - {party.name}", date_from, date_to, sides=SIDES[party.type])
     table.meta.update(party_id=party.id, party_name=party.name, phone=party.phone)
     return table
 
@@ -132,7 +148,7 @@ def staff_khata(db: Session, staff_id: int, date_from: dt.date, date_to: dt.date
     staff = db.get(Staff, staff_id)
     if staff is None:
         raise NotFound("Staff member not found")
-    table = ledger(db, staff.account_id, f"Labour khata - {staff.name}", date_from, date_to)
+    table = ledger(db, staff.account_id, f"Labour khata - {staff.name}", date_from, date_to, sides=SIDES["staff"])
     counts = {"present": 0, "half": 0, "absent": 0}
     for status, n in db.execute(
         select(Attendance.status, func.count())
@@ -156,17 +172,92 @@ def staff_khata(db: Session, staff_id: int, date_from: dt.date, date_to: dt.date
             Payment.status == "active", Payment.date >= date_from, Payment.date <= date_to,
         )
     )  # fmt: skip
+    trip = trip_money(db, staff, date_from, date_to)
+    balance_payable = -table.meta["closing"]
     table.meta.update(
         staff_id=staff.id,
         staff_name=staff.name,
+        basic_pay=staff.wage_amount if staff.wage_type == "monthly" else None,
+        trips=trip["trips"],
+        trip_earned=trip["earned"],
+        trip_paid=trip["paid"],
+        trip_balance=trip["balance"],
+        # What is owed apart from trip money: salary/wages less advances and salary payouts.
+        salary_balance=balance_payable - trip["balance"],
+        salary_paid=Decimal(
+            db.scalar(
+                select(func.sum(Payment.amount)).where(
+                    Payment.staff_id == staff_id,
+                    Payment.purpose == "salary",
+                    Payment.direction == "out",
+                    Payment.status == "active",
+                    Payment.date >= date_from,
+                    Payment.date <= date_to,
+                )
+            )
+            or 0
+        ),  # fmt: skip
+        salary_left=_salary_left(db, staff, balance_payable - trip["balance"], date_from, date_to),
         days_present=counts["present"],
         half_days=counts["half"],
         days_absent=counts["absent"],
         wages_earned=Decimal(earned or 0),
         advances_paid=Decimal(advances or 0),
-        balance_payable=-table.meta["closing"],
+        balance_payable=balance_payable,
     )
     return table
+
+
+def _salary_left(db: Session, staff: Staff, salary_balance: Decimal, date_from: dt.date, date_to: dt.date):
+    """For a monthly worker before the month is settled: basic pay less what he already owes back (advances).
+    Once a settlement in the period has posted the salary, the balance itself is what is left."""
+    if staff.wage_type != "monthly":
+        return None
+    settled = db.scalar(
+        select(WageSettlement.id).where(
+            WageSettlement.staff_id == staff.id, WageSettlement.status == "active",
+            WageSettlement.period_to >= date_from, WageSettlement.period_to <= date_to,
+        )
+    )  # fmt: skip
+    return salary_balance if settled else staff.wage_amount + salary_balance
+
+
+def trip_money(db: Session, staff: Staff, date_from: dt.date, date_to: dt.date) -> dict:
+    """Trip pay is credited inside challan/purchase/rental entries and paid out as 'trip' payments, so it can be
+    told apart from salary on the same khata. The balance is as of `date_to`; earned/paid are for the period."""
+
+    def earned(since: dt.date | None) -> Decimal:
+        q = (
+            select(func.sum(JournalLine.credit - JournalLine.debit))
+            .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
+            .where(
+                JournalLine.account_id == staff.account_id,
+                JournalEntry.source_type.in_(("delivery", "purchase", "rental")),
+                JournalEntry.date <= date_to,
+            )
+        )
+        return Decimal(db.scalar(q.where(JournalEntry.date >= since) if since else q) or 0)
+
+    def paid(since: dt.date | None) -> Decimal:
+        q = select(func.sum(Payment.amount)).where(
+            Payment.staff_id == staff.id, Payment.purpose == "trip", Payment.direction == "out",
+            Payment.status == "active", Payment.date <= date_to,
+        )  # fmt: skip
+        return Decimal(db.scalar(q.where(Payment.date >= since) if since else q) or 0)
+
+    trips = 0
+    for model, who, extra in (
+        (Delivery, Delivery.driver_id, []),
+        (Purchase, Purchase.driver_id, [Purchase.transport_by == "own"]),
+        (Rental, Rental.operator_id, []),
+    ):
+        trips += db.scalar(
+            select(func.coalesce(func.sum(model.trips), 0)).where(
+                who == staff.id, model.status == "active", model.trip_pay > 0,
+                model.date >= date_from, model.date <= date_to, *extra,
+            )
+        ) or 0  # fmt: skip
+    return {"trips": trips, "earned": earned(date_from), "paid": paid(date_from), "balance": earned(None) - paid(None)}
 
 
 # ---------------------------------------------------------------------------------------------------
@@ -310,7 +401,8 @@ def day_book(db: Session, day: dt.date) -> ReportTable:
                 "no": e.id,
                 "type": ("Reversal: " if e.reverses_id else "") + SOURCE_LABEL.get(e.source_type, e.source_type),
                 "narration": e.narration,
-                "accounts": f"Dr {dr_names} / Cr {cr_names}",
+                # value moves from the right-hand side to the left: "Sales → Ali Builders"
+                "accounts": f"{cr_names} → {dr_names}",
                 "amount": sum((ln.debit for ln in e.lines), ZERO),
             }
         )
@@ -333,7 +425,7 @@ def day_book(db: Session, day: dt.date) -> ReportTable:
 # Profit reports (admin)
 # ---------------------------------------------------------------------------------------------------
 def vehicle_pnl(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTable:
-    """Per vehicle: trips, revenue (freight + rent), diesel, repair, driver salary -> profit.
+    """Per vehicle: trips (loads), revenue (freight + rent), diesel, repair, driver salary + trip pay -> profit.
 
     `vehicle_id` on journal lines is the cost centre. Material sale value is NOT vehicle revenue.
     """
@@ -348,7 +440,7 @@ def vehicle_pnl(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTabl
         by_vehicle[vehicle_id][code] += Decimal(net)
     trips = dict(
         db.execute(
-            select(Delivery.vehicle_id, func.count()).where(
+            select(Delivery.vehicle_id, func.sum(Delivery.trips)).where(
                 Delivery.status == "active", Delivery.vehicle_id.is_not(None),
                 Delivery.date >= date_from, Delivery.date <= date_to,
             ).group_by(Delivery.vehicle_id)
@@ -366,8 +458,10 @@ def vehicle_pnl(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTabl
         c = by_vehicle.get(v.id, {})
         revenue = -(c.get(Code.FREIGHT, ZERO) + c.get(Code.RENT, ZERO))
         diesel, repair = c.get(Code.DIESEL, ZERO), c.get(Code.REPAIR, ZERO)
-        other = sum((c.get(k, ZERO) for k in (Code.TYRE, Code.INSURANCE, Code.TOLL, Code.OFFICE, Code.MISC)), ZERO)
-        salary = c.get(Code.SALARY, ZERO) + c.get(Code.LABOUR_WAGES, ZERO)
+        other = sum(
+            (c.get(k, ZERO) for k in (Code.TYRE, Code.INSURANCE, Code.TOLL, Code.OFFICE, Code.FOOD, Code.MISC)), ZERO
+        )
+        salary = c.get(Code.SALARY, ZERO) + c.get(Code.LABOUR_WAGES, ZERO) + c.get(Code.TRIP_PAY, ZERO)
         cost = diesel + repair + other + salary
         if not c and v.id not in trips and v.id not in rentals:
             continue
@@ -396,6 +490,58 @@ def vehicle_pnl(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTabl
         ],
         rows=rows,
         totals={"vehicle": "Total"} | {k: sum((r[k] for r in rows), ZERO) for k in keys},
+    )
+
+
+def fuel(db: Session, date_from: dt.date, date_to: dt.date, group_by: str = "vehicle") -> ReportTable:
+    """Fuel given out: fills, litres, amount and average price per litre, per vehicle or per pump.
+    "On credit" is what went on a pump's khata; the pump's own balance is in its party khata."""
+    by_pump = group_by == "pump"
+    key = Expense.party_id if by_pump else Expense.vehicle_id
+    on_credit = func.sum(case((Expense.paid_via == "party_credit", Expense.amount), else_=0))
+    names = {p.id: p.name for p in db.scalars(select(Party))} if by_pump else {
+        v.id: v.name for v in db.scalars(select(Vehicle))
+    }  # fmt: skip
+    rows = []
+    for ref, fills, litres, amount, litre_amount, credit in db.execute(
+        select(
+            key, func.count(), func.coalesce(func.sum(Expense.litres), 0), func.sum(Expense.amount),
+            func.coalesce(func.sum(case((Expense.litres.is_not(None), Expense.amount), else_=0)), 0), on_credit,
+        )
+        .where(Expense.category == "diesel", Expense.status == "active", Expense.date >= date_from, Expense.date <= date_to)
+        .group_by(key)
+    ):  # fmt: skip
+        litres = Decimal(litres)
+        rows.append(
+            {
+                "name": names.get(ref, "") if ref else ("Paid in cash" if by_pump else "No vehicle"),
+                "fills": fills, "litres": qty(litres), "amount": money(Decimal(amount)),
+                # only entries that have litres count towards the average price
+                "avg_rate": money(Decimal(litre_amount) / litres) if litres else ZERO,
+                "on_credit": money(Decimal(credit)),
+            }
+        )  # fmt: skip
+    rows.sort(key=lambda r: r["amount"], reverse=True)
+    total_litres = sum((r["litres"] for r in rows), ZERO)
+    return ReportTable(
+        title="Fuel " + ("by pump" if by_pump else "by vehicle"),
+        subtitle=_range_label(date_from, date_to),
+        columns=[
+            Col("name", "Pump" if by_pump else "Vehicle"),
+            Col("fills", "Fills", "int"),
+            Col("litres", "Litres", "qty"),
+            Col("avg_rate", "Avg rate / litre", "money"),
+            Col("amount", "Amount", "money"),
+            Col("on_credit", "Pump udhaar", "money"),
+        ],
+        rows=rows,
+        totals={
+            "name": "Total",
+            "fills": sum(r["fills"] for r in rows),
+            "litres": total_litres,
+            "amount": sum((r["amount"] for r in rows), ZERO),
+            "on_credit": sum((r["on_credit"] for r in rows), ZERO),
+        },  # fmt: skip
     )
 
 
@@ -660,12 +806,61 @@ def yard_stock(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTable
 # ---------------------------------------------------------------------------------------------------
 # Dashboard
 # ---------------------------------------------------------------------------------------------------
-def dashboard(db: Session, *, with_profit: bool = False) -> dict:
+def _money_moved_on(day: dt.date) -> list:
+    """Filters for cash/bank lines that really moved on `day`. Edits and voids post a reversal pair,
+    so both halves are left out to show real movement, not bookkeeping. Joins JournalEntry itself."""
+    money_ids = select(MoneyAccount.account_id).where(MoneyAccount.account_id.is_not(None))
+    reversed_ids = select(JournalEntry.reverses_id).where(JournalEntry.reverses_id.is_not(None))
+    return [
+        JournalLine.journal_id == JournalEntry.id,
+        JournalLine.account_id.in_(money_ids),
+        JournalEntry.date == day,
+        JournalEntry.reverses_id.is_(None),
+        JournalEntry.id.not_in(reversed_ids),
+    ]
+
+
+def money_moves(db: Session, day: dt.date, direction: str = "in") -> ReportTable:
+    """Every rupee that came into (or went out of) cash and bank on one day, one line each.
+    The total is the dashboard's "Money received" / "Money paid out" for that day."""
+    incoming = direction == "in"
+    amount = JournalLine.debit if incoming else JournalLine.credit
+    accounts = {m.account_id: m.name for m in db.scalars(select(MoneyAccount))}
+    rows = [
+        {
+            "type": SOURCE_LABEL.get(source_type, source_type),
+            "narration": narration,
+            "account": accounts.get(account_id, ""),
+            "amount": money(Decimal(value)),
+        }
+        for source_type, narration, account_id, value in db.execute(
+            select(JournalEntry.source_type, JournalEntry.narration, JournalLine.account_id, amount)
+            .where(*_money_moved_on(day), amount > 0)
+            .order_by(JournalEntry.id)
+        )
+    ]
+    return ReportTable(
+        title="Money received" if incoming else "Money paid out",
+        subtitle=f"{day:%d-%m-%Y}",
+        columns=[
+            Col("type", "Type"),
+            Col("narration", "Details"),
+            Col("account", "Cash / bank"),
+            Col("amount", "Amount", "money"),
+        ],
+        rows=rows,
+        totals={"narration": f"Total ({len(rows)})", "amount": sum((r["amount"] for r in rows), ZERO)},
+    )
+
+
+def dashboard(db: Session, *, with_profit: bool = False, on: dt.date | None = None) -> dict:
     """Owner's one-screen summary: today, where the money is, how business is going, and what needs doing.
 
-    `with_profit` adds this month's income/expense/profit; only roles allowed to see profit get it.
+    `on` looks at another day: its trips, sales, money in/out and vehicles (balances stay as of now).
+    `with_profit` adds that month's income/expense/profit; only roles allowed to see profit get it.
     """
-    today = dt.date.today()
+    now = dt.date.today()
+    today = on or now
     yesterday = today - dt.timedelta(days=1)
     parties = db.scalars(select(Party)).all()
     party_bal = account_balances(db, [p.account_id for p in parties if p.account_id])
@@ -690,14 +885,15 @@ def dashboard(db: Session, *, with_profit: bool = False) -> dict:
         )
 
     def trips_on(day: dt.date) -> int:
-        return db.scalar(select(func.count()).select_from(Delivery).where(active, Delivery.date == day)) or 0
+        # Loads, not challans: 3 trolleys on one challan are 3 trips out of the yard.
+        return db.scalar(select(func.sum(Delivery.trips)).where(active, Delivery.date == day)) or 0
 
     # Last 14 days, one bar per day (days with no challans show as zero).
     first_day = today - dt.timedelta(days=13)
     per_day = {
         d: (Decimal(total), n)
         for d, total, n in db.execute(
-            select(Delivery.date, func.sum(challan_total), func.count())
+            select(Delivery.date, func.sum(challan_total), func.sum(Delivery.trips))
             .where(active, Delivery.date >= first_day, Delivery.date <= today)
             .group_by(Delivery.date)
         )
@@ -717,18 +913,18 @@ def dashboard(db: Session, *, with_profit: bool = False) -> dict:
     trips_by_material = [
         {"material": name, "unit": unit, "trips": n, "qty": str(qty(Decimal(q)))}
         for name, unit, n, q in db.execute(
-            select(Material.name, Material.unit, func.count(), func.sum(Delivery.stock_qty))
+            select(Material.name, Material.unit, func.sum(Delivery.trips), func.sum(Delivery.stock_qty))
             .join(Material, Material.id == Delivery.material_id)
             .where(active, Delivery.date == today)
             .group_by(Material.name, Material.unit)
-            .order_by(func.count().desc())
+            .order_by(func.sum(Delivery.trips).desc())
         )
     ]
 
     # Every vehicle, with today's challan + rental count, so idle ones are visible too.
     trips_today_by_vehicle: dict[int, int] = defaultdict(int)
     for vid, n in db.execute(
-        select(Delivery.vehicle_id, func.count())
+        select(Delivery.vehicle_id, func.sum(Delivery.trips))
         .where(active, Delivery.date == today, Delivery.vehicle_id.is_not(None))
         .group_by(Delivery.vehicle_id)
     ):
@@ -744,18 +940,9 @@ def dashboard(db: Session, *, with_profit: bool = False) -> dict:
         for v in db.scalars(select(Vehicle).where(Vehicle.is_active).order_by(Vehicle.type, Vehicle.name))
     ]
 
-    # Money that actually moved in/out of cash and bank today. Edits and voids post a reversal pair,
-    # so both halves are left out to show real movement, not bookkeeping.
-    money_ids = [m.account_id for m in money_accounts]
-    reversed_ids = select(JournalEntry.reverses_id).where(JournalEntry.reverses_id.is_not(None))
     moved_in, moved_out = db.execute(
-        select(func.coalesce(func.sum(JournalLine.debit), 0), func.coalesce(func.sum(JournalLine.credit), 0))
-        .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
-        .where(
-            JournalLine.account_id.in_(money_ids),
-            JournalEntry.date == today,
-            JournalEntry.reverses_id.is_(None),
-            JournalEntry.id.not_in(reversed_ids),
+        select(func.coalesce(func.sum(JournalLine.debit), 0), func.coalesce(func.sum(JournalLine.credit), 0)).where(
+            *_money_moved_on(today)
         )
     ).one()
 
@@ -795,7 +982,7 @@ def dashboard(db: Session, *, with_profit: bool = False) -> dict:
         (
             {"party_id": p.id, "name": p.name, "balance": str(party_bal[p.account_id]), "days": days}
             for p in owing
-            if (d := oldest.get(p.account_id)) and (days := (today - d).days) > settings.credit_overdue_days
+            if (d := oldest.get(p.account_id)) and (days := (now - d).days) > settings.credit_overdue_days
         ),
         key=lambda r: -r["days"],
     )

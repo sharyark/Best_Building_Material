@@ -71,7 +71,7 @@ function PaymentFormView({ doc, preset, onDone }: DocFormProps<Payment, Preset>)
             <Col xs={24} sm={14}><Field control={control} name="staff_id" label="Staff member" required>{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.staff)} value={f.value} onChange={f.onChange} allowClear={false} autoFocus />}</Field></Col>
             <Col xs={24} sm={10}>
               <Field control={control} name="purpose" label="Purpose">
-                {(f) => <Select {...f} options={[{ value: 'advance', label: 'Advance (loan against wages)' }, { value: 'salary', label: 'Salary / wage payout' }, { value: 'general', label: 'Other' }]} />}
+                {(f) => <Select {...f} options={[{ value: 'advance', label: 'Advance (loan against wages)' }, { value: 'salary', label: 'Salary / wage payout' }, { value: 'trip', label: 'Trip money (weekly trips)' }, { value: 'general', label: 'Other' }]} />}
               </Field>
             </Col>
           </>

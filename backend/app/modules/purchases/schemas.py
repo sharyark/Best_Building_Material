@@ -5,7 +5,7 @@ from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.core.types import PositiveMoney, PositiveQty
+from app.core.types import MoneyIn, PositiveMoney, PositiveQty
 from app.modules.common_schemas import EditableIn, EditInfoOut, VoidIn  # noqa: F401  (re-exported for the router)
 
 
@@ -22,6 +22,8 @@ class PurchaseIn(EditableIn):
     vehicle_id: int | None = None
     driver_id: int | None = None
     transport_by: Literal["own", "supplier"] = "supplier"
+    # Driver's pay for the trip (own vehicle only); omitted -> the driver's usual trip rate.
+    trip_pay: MoneyIn | None = None
     notes: str | None = None
     lines: list[PurchaseLineIn] = Field(min_length=1)
     client_ref: uuid.UUID | None = None
@@ -49,6 +51,8 @@ class PurchaseOut(EditInfoOut):
     vehicle_id: int | None
     driver_id: int | None
     transport_by: str
+    trips: int
+    trip_pay: Decimal
     status: str
     void_reason: str | None
     notes: str | None

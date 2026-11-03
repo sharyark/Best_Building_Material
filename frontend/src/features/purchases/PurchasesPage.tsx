@@ -17,6 +17,7 @@ import { Field } from '@/components/Field'
 import { Money } from '@/components/Money'
 import { QuickAddParty } from '@/components/QuickAdd'
 import { usePermission } from '@/hooks/usePermission'
+import { useTripPay } from '@/hooks/useTripPay'
 import { useVehicleDriver } from '@/hooks/useVehicleDriver'
 import { formatDate, today } from '@/lib/date'
 import { formatQty, toNumber } from '@/lib/format'
@@ -33,7 +34,7 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
     defaultValues: doc
       ? {
           date: doc.date, supplier_id: doc.supplier_id, supplier_slip_no: doc.supplier_slip_no ?? '', transport_by: doc.transport_by,
-          vehicle_id: doc.vehicle_id, driver_id: doc.driver_id, notes: doc.notes ?? '',
+          vehicle_id: doc.vehicle_id, driver_id: doc.driver_id, notes: doc.notes ?? '', trip_pay: String(doc.trip_pay ?? '0'),
           lines: doc.lines.map((l) => ({ material_id: l.material_id, qty: String(l.qty), rate: String(l.rate) })),
         }
       : { date: today(), transport_by: 'supplier', supplier_slip_no: '', notes: '', lines: [{ material_id: undefined as unknown as number, qty: '', rate: '' }] },
@@ -44,6 +45,11 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
   const [date, vehicleId, driverId] = useWatch({ control, name: ['date', 'vehicle_id', 'driver_id'] })
   const setDriver = useCallback((id: number | null) => setValue('driver_id', id), [setValue])
   const driver = useVehicleDriver({ vehicleId: transportBy === 'own' ? vehicleId : null, date, driverId, setDriver, editing: Boolean(doc) })
+  const setTripPay = useCallback((v: string) => setValue('trip_pay', v), [setValue])
+  // Same rule as the server: each trolley of loose material brought in is a trip; bags or pieces make one.
+  const trolleys = lines.reduce((s, l) => s + (lookups.materialById.get(l?.material_id)?.unit === 'trolley' ? toNumber(l?.qty) : 0), 0)
+  const trips = !lookups.materials.length && doc ? doc.trips : Math.max(1, Math.ceil(trolleys))
+  const tripPay = useTripPay({ driverId: transportBy === 'own' ? driverId : null, trips, setTripPay, editing: Boolean(doc) })
   const total = lines.reduce((s, l) => s + toNumber(l?.qty) * toNumber(l?.rate), 0)
   const save = useSave<object>(doc ? 'put' : 'post', doc ? `/purchases/${doc.id}` : '/purchases', { successMessage: 'Purchase saved', onSuccess: onDone })
 
@@ -52,7 +58,7 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
       editReason={doc ? { value: editReason, onChange: setEditReason } : undefined}
       saving={save.isPending}
       onSubmit={handleSubmit((v) =>
-        save.mutate({ ...v, supplier_slip_no: v.supplier_slip_no || null, notes: v.notes || null, vehicle_id: transportBy === 'own' ? v.vehicle_id || null : null, driver_id: transportBy === 'own' ? v.driver_id || null : null, ...(doc ? { edit_reason: editReason.trim() } : { client_ref: clientRef.current }) }),
+        save.mutate({ ...v, supplier_slip_no: v.supplier_slip_no || null, notes: v.notes || null, vehicle_id: transportBy === 'own' ? v.vehicle_id || null : null, driver_id: transportBy === 'own' ? v.driver_id || null : null, trip_pay: transportBy === 'own' && v.driver_id ? v.trip_pay || '0' : null, ...(doc ? { edit_reason: editReason.trim() } : { client_ref: clientRef.current }) }),
       )}
       extra={<Typography.Text>Total: <Typography.Text strong><Money value={total} /></Typography.Text></Typography.Text>}
     >
@@ -68,7 +74,8 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
         {transportBy === 'own' && (
           <>
             <Col xs={24} sm={12}><Field control={control} name="vehicle_id" label="Vehicle">{(f) => <EntitySelect id={f.id} options={optionsOf(lookups.vehicles)} value={f.value} onChange={(v) => { driver.release(); f.onChange(v); if (!v) setValue('driver_id', null) }} />}</Field></Col>
-            <Col xs={24} sm={12}><Field control={control} name="driver_id" label="Driver" extra={driver.hint}>{(f) => <EntitySelect id={f.id} options={driver.options} value={f.value} onChange={(v) => { driver.onPick(); f.onChange(v) }} />}</Field></Col>
+            <Col xs={24} sm={12}><Field control={control} name="driver_id" label="Driver" extra={driver.hint}>{(f) => <EntitySelect id={f.id} {...driver.selectProps} value={f.value} onChange={(v) => { driver.onPick(); f.onChange(v) }} />}</Field></Col>
+            {driverId && <Col xs={24} sm={12}><Field control={control} name="trip_pay" label="Trip pay (driver)" extra={tripPay.rateNote}>{(f) => <MoneyInput {...f} onChange={(v) => { tripPay.onType(); f.onChange(v) }} />}</Field></Col>}
           </>
         )}
       </Row>
@@ -88,6 +95,7 @@ function PurchaseFormView({ doc, onDone }: DocFormProps<Purchase, undefined>) {
       ))}
       <Button type="dashed" icon={<PlusOutlined />} style={{ margin: '4px 0 16px' }} onClick={() => append({ material_id: undefined as unknown as number, qty: '', rate: '' })}>Add material</Button>
       <QuickAddParty open={adding !== null} type="supplier" initialName={adding ?? ''} onClose={() => setAdding(null)} onCreated={(p) => setValue('supplier_id', p.id, { shouldValidate: true })} />
+      {driver.modal}
     </DocFormShell>
   )
 }

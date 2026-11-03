@@ -26,13 +26,20 @@ def perm(name: str):
 
 
 @router.get("/dashboard", dependencies=[perm("dashboard.view")])
-def dashboard(db: DB, user: CurrentUser):
-    return JSONResponse(q.dashboard(db, with_profit=has_permission(user.role, "report.profit")))
+def dashboard(db: DB, user: CurrentUser, on: dt.date | None = None):
+    """`on` = the day to look at (default today)."""
+    return JSONResponse(q.dashboard(db, with_profit=has_permission(user.role, "report.profit"), on=on))
+
+
+@router.get("/money-moves", dependencies=[perm("report.cashbook")])
+def money_moves(db: DB, date: dt.date | None = None, direction: str = "in", fmt: Format = "json"):
+    """What made up the dashboard's money received / paid out on a day, line by line."""
+    return respond(q.money_moves(db, date or dt.date.today(), "out" if direction == "out" else "in"), fmt)
 
 
 @router.get("/khata/{party_id}", dependencies=[perm("report.khata")])
 def khata(party_id: int, db: DB, date_from: DateFrom = None, date_to: DateTo = None, fmt: Format = "json"):
-    """Customer or supplier statement: date-wise Dr/Cr with running balance."""
+    """Customer or supplier statement: date-wise bill, wasool / pay and running baqaya."""
     start, end = q.default_range(date_from, date_to)
     if date_from is None:
         start = dt.date(2000, 1, 1)  # a khata defaults to the whole history
@@ -48,16 +55,17 @@ def khata_share(party_id: int, db: DB, date_from: DateFrom = None, date_to: Date
         start = dt.date(2000, 1, 1)
     table = q.party_khata(db, party_id, start, end)
     closing = table.meta["closing"]
-    side = "receivable from you" if closing > 0 else "payable to you" if closing < 0 else "settled"
+    side = "aap ne dena hai" if closing > 0 else "hum ne dena hai" if closing < 0 else "hisaab barabar"
+    debit_word, credit_word = q.SIDES[party.type]
     last = [r for r in table.rows if r["type"] != "Opening"][-5:]
     lines = [
-        f"{fmt_date(r['date'])} {r['type']}: {fmt_money(r['debit'] or r['credit'])} {'Dr' if r['debit'] else 'Cr'}"
+        f"{fmt_date(r['date'])} {r['type']}: {debit_word if r['debit'] else credit_word} {fmt_money(r['debit'] or r['credit'])}"
         for r in last
     ]
     message = (
-        f"Assalam o Alaikum {party.name},\nYour account statement as of {end:%d-%m-%Y}:\n"
+        f"Assalam o Alaikum {party.name},\nAap ka khata {end:%d-%m-%Y} tak:\n"
         + ("\n".join(lines) + "\n" if lines else "")
-        + f"Balance: {fmt_money(abs(closing))} ({side})."
+        + f"Baqaya: {fmt_money(abs(closing))} ({side})."
     )
     digits = re.sub(r"\D", "", party.phone or "")
     url = f"https://wa.me/{digits}?text={quote(message)}" if digits else f"https://wa.me/?text={quote(message)}"
@@ -101,6 +109,12 @@ def day_book(db: DB, date: dt.date | None = None, fmt: Format = "json"):
 def vehicle_pnl(db: DB, date_from: DateFrom = None, date_to: DateTo = None, fmt: Format = "json"):
     start, end = q.default_range(date_from, date_to)
     return respond(q.vehicle_pnl(db, start, end), fmt)
+
+
+@router.get("/fuel", dependencies=[perm("report.fuel")])
+def fuel(db: DB, date_from: DateFrom = None, date_to: DateTo = None, group_by: str = "vehicle", fmt: Format = "json"):
+    start, end = q.default_range(date_from, date_to)
+    return respond(q.fuel(db, start, end, "pump" if group_by == "pump" else "vehicle"), fmt)
 
 
 @router.get("/material-margin", dependencies=[perm("report.profit")])

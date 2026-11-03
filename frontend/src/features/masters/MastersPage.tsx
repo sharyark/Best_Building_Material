@@ -36,7 +36,7 @@ function Customers() {
     { title: 'Name', dataIndex: 'name' },
     { title: 'Type', dataIndex: 'type', render: partyType },
     { title: 'Phone', dataIndex: 'phone' },
-    { title: 'Balance (Dr = owes us)', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
+    { title: 'Baqaya', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
   ]
   return (
     <CrudTable<Party & Record<string, unknown>>
@@ -56,7 +56,7 @@ function Suppliers() {
     { title: 'Name', dataIndex: 'name' },
     { title: 'Type', dataIndex: 'type', render: partyType },
     { title: 'Phone', dataIndex: 'phone' },
-    { title: 'Balance (Cr = we owe)', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
+    { title: 'Baqaya', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
   ]
   return (
     <CrudTable<Party & Record<string, unknown>>
@@ -75,6 +75,7 @@ function Materials() {
   const units = ['trolley', 'cft', 'ton', 'bag', 'piece', 'brass'].map((u) => ({ value: u, label: u }))
   const columns: ColumnsType<Material> = [
     { title: 'Material', dataIndex: 'name' },
+    { title: 'Group', dataIndex: 'group_name', render: (v: string | null) => v ?? '' },
     { title: 'Unit', dataIndex: 'unit' },
     { title: 'Default sale rate', dataIndex: 'default_sale_rate', align: 'right', render: (v) => <Money value={v} /> },
     { title: 'Default purchase rate', dataIndex: 'default_purchase_rate', align: 'right', render: (v) => <Money value={v} /> },
@@ -84,6 +85,7 @@ function Materials() {
   const fields: FieldSpec[] = [
     { name: 'name', label: 'Name', kind: 'text', required: true },
     { name: 'unit', label: 'Unit (same for buying and selling)', kind: 'select', required: true, options: units },
+    { name: 'group_name', label: 'Group (for types of one product)', kind: 'text', hint: 'e.g. Cement for "Cement - OPC", "Cement - SRC", "Cement - White". The challan lists the group once, then asks the type. Leave empty for a single material.' },
     { name: 'default_sale_rate', label: 'Default sale rate', kind: 'money', required: true },
     { name: 'default_purchase_rate', label: 'Default purchase rate', kind: 'money', required: true },
     { name: 'hsn_code', label: 'HSN code (tax)', kind: 'text' },
@@ -120,7 +122,8 @@ function StaffTab() {
     { title: 'Role', dataIndex: 'role' },
     { title: 'Pay type', dataIndex: 'wage_type', render: (v: string) => v.replace('_', ' ') },
     { title: 'Wage', dataIndex: 'wage_amount', align: 'right', render: (v) => <Money value={v} /> },
-    { title: 'Balance (Cr = we owe)', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
+    { title: 'Trip rate', dataIndex: 'trip_rate', align: 'right', render: (v) => (Number(v) > 0 ? <Money value={v} /> : '-') },
+    { title: 'Baqaya', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
   ]
   const fields: FieldSpec[] = [
     { name: 'name', label: 'Name', kind: 'text', required: true },
@@ -128,16 +131,18 @@ function StaffTab() {
     { name: 'role', label: 'Role', kind: 'select', required: true, options: ['driver', 'operator', 'labour', 'helper', 'munshi'].map((v) => ({ value: v, label: v })) },
     { name: 'wage_type', label: 'Paid', kind: 'select', required: true, options: [{ value: 'monthly', label: 'Monthly salary' }, { value: 'daily', label: 'Daily wage' }, { value: 'per_trip', label: 'Per trip' }] },
     { name: 'wage_amount', label: 'Wage amount (per month / day / trip)', kind: 'money', required: true },
+    { name: 'trip_rate', label: 'Trip rate (filled on each challan, can be changed there)', kind: 'money' },
     { name: 'default_vehicle_id', label: 'Default vehicle (cost centre)', kind: 'entity', options: optionsOf(allVehicles) },
   ]
-  return <CrudTable<Staff & Record<string, unknown>> endpoint="/masters/staff" entityName="Staff" params={{ with_balance: true }} columns={columns as never} fields={fields} defaults={{ role: 'labour', wage_type: 'daily', wage_amount: '0' }} rowActions={(r) => <Link to={`/reports/staff-khata?staff=${r.id}`}><Button size="small" type="link">Khata</Button></Link>} />
+  return <CrudTable<Staff & Record<string, unknown>> endpoint="/masters/staff" entityName="Staff" params={{ with_balance: true }} columns={columns as never} fields={fields} defaults={{ role: 'labour', wage_type: 'daily', wage_amount: '0', trip_rate: '0' }} rowActions={(r) => <Link to={`/reports/staff-khata?staff=${r.id}`}><Button size="small" type="link">Khata</Button></Link>} />
 }
 
 function MoneyAccounts() {
   const columns: ColumnsType<MoneyAccount> = [
     { title: 'Account', dataIndex: 'name' },
     { title: 'Kind', dataIndex: 'kind' },
-    { title: 'Balance', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} drcr /> },
+    // cash and bank: what is in hand, not lena/dena
+    { title: 'Balance', dataIndex: 'balance', align: 'right', render: (v) => <Money value={v} /> },
   ]
   const fields: FieldSpec[] = [
     { name: 'name', label: 'Name (e.g. Bank - HBL, JazzCash)', kind: 'text', required: true },

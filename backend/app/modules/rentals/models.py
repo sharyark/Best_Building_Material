@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, String, Text
+from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, BigIntFK, BigIntPK, Money, Qty, TimestampMixin
@@ -18,6 +18,9 @@ class Rental(Base, TimestampMixin, TxnMixin):
     site_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("sites.id"), nullable=True)
     vehicle_id: Mapped[int] = mapped_column(BigIntFK, ForeignKey("vehicles.id"))
     operator_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("staff.id"), nullable=True)
+    # Operator's trip pay, posted with the rental. Trips = qty when charged per trip, else one.
+    trip_pay: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
+    trips: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
     basis: Mapped[str] = mapped_column(String(5))  # hour | trip | day
     qty: Mapped[Decimal] = mapped_column(Qty)
     rate: Mapped[Decimal] = mapped_column(Money)

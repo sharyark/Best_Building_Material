@@ -2,14 +2,16 @@ import {
   ArrowDownOutlined, ArrowUpOutlined, BankOutlined, CarOutlined, CheckCircleFilled, ClockCircleOutlined, DatabaseOutlined,
   DollarOutlined, MinusOutlined, TeamOutlined, WalletOutlined,
 } from '@ant-design/icons'
-import { Alert, Card, Col, Empty, Row, Skeleton, Typography } from 'antd'
+import { Alert, Button, Card, Col, Empty, Row, Skeleton, Typography } from 'antd'
 import type { ReactNode } from 'react'
-import { Link } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { apiError } from '@/api/client'
 import { useGet } from '@/api/hooks'
 import type { Dashboard } from '@/api/types'
+import { DateField } from '@/components/DateField'
 import { HeroBanner } from '@/components/HeroBanner'
 import { usePermission } from '@/hooks/usePermission'
+import { formatDate, rangeFromUrl, today } from '@/lib/date'
 import { formatCurrency, formatQty, formatShort, toNumber } from '@/lib/format'
 import { SalesChart } from './SalesChart'
 
@@ -22,12 +24,13 @@ const cardStyle = { borderRadius: 12, borderColor: '#edf0f3', boxShadow: '0 1px 
 const rs = (v: string | number) => formatCurrency(v).replace(/\.00$/, '')
 
 /** Section heading phrased as the question it answers, so the owner knows what to look at. */
-function Section({ title, hint, children }: { title: string; hint: string; children: ReactNode }) {
+function Section({ title, hint, extra, children }: { title: string; hint: string; extra?: ReactNode; children: ReactNode }) {
   return (
     <section className="dash-section">
       <div className="dash-section-head">
         <Typography.Title level={5} style={{ margin: 0 }}>{title}</Typography.Title>
         <Typography.Text type="secondary">{hint}</Typography.Text>
+        {extra && <div className="dash-section-extra">{extra}</div>}
       </div>
       {children}
     </section>
@@ -52,7 +55,7 @@ function Change({ now, before, label, upIsGood = true, money = true }: { now: nu
 function TodayTile({ label, value, icon, foot, to }: { label: string; value: ReactNode; icon: ReactNode; foot: ReactNode; to?: string }) {
   const body = (
     <Card size="small" hoverable={Boolean(to)} style={cardStyle} styles={{ body: { padding: 16 } }}>
-      <div className="dash-tile-label">{icon}{label}</div>
+      <div className="dash-tile-label">{icon}{label}{to && <span className="dash-tile-open" aria-hidden><span className="dash-open-word">Open </span>›</span>}</div>
       <div className="dash-tile-value">{value}</div>
       <div className="dash-tile-foot">{foot}</div>
     </Card>
@@ -82,10 +85,19 @@ function BarList({ rows, empty }: { rows: { key: string | number; label: ReactNo
 interface Todo { key: string; tone: 'bad' | 'warn'; icon: ReactNode; text: ReactNode; action?: { to: string; label: string } }
 
 export default function DashboardPage() {
-  const { data: d, isLoading, error } = useGet<Dashboard>('/reports/dashboard', undefined, { staleTime: 10_000 })
+  // The day being looked at lives in the link (?date=), so Back from a drill-down returns to the same day.
+  const [search, setSearch] = useSearchParams()
+  const day = rangeFromUrl(search)?.[0] ?? today()
+  const isToday = day === today()
+  const setDay = (iso: string) => setSearch(iso === today() ? {} : { date: iso }, { replace: true })
+  const { data: d, isLoading, error } = useGet<Dashboard>('/reports/dashboard', { on: day }, { staleTime: 10_000 })
   const canKhata = usePermission('report.khata')
+  const canMoneyLines = usePermission('report.cashbook')
   if (error) return <Alert type="error" showIcon message={apiError(error).message} />
   if (isLoading || !d) return <><HeroBanner /><Skeleton active paragraph={{ rows: 10 }} /></>
+  const dayWord = isToday ? 'today' : `on ${formatDate(day)}`
+  const before = isToday ? 'yesterday' : 'the day before'
+  const moneyLink = (direction: 'in' | 'out') => (canMoneyLines ? `/reports/money-moves?date=${day}&direction=${direction}` : `/payments?date=${day}`)
 
   const n = toNumber
   const inHand = n(d.cash_in_hand) + n(d.bank_balance)
@@ -117,25 +129,34 @@ export default function DashboardPage() {
 
   return (
     <div className="dash">
-      <HeroBanner date={d.date} trips={d.trips_today} />
+      <HeroBanner date={d.date} trips={d.trips_today} isToday={isToday} />
 
-      <Section title="Today" hint="What happened today, compared with yesterday">
+      <Section
+        title={isToday ? 'Today' : formatDate(day)}
+        hint={`What happened ${dayWord}, compared with ${before}. Tap a box to see the entries.`}
+        extra={
+          <div className="dash-day-pick">
+            <div style={{ width: 150 }}><DateField id="dash-day" value={day} onChange={setDay} /></div>
+            {!isToday && <Button onClick={() => setDay(today())}>Today</Button>}
+          </div>
+        }
+      >
         <Row gutter={[12, 12]}>
           <Col xs={12} lg={6}>
-            <TodayTile label="Trips" icon={<CarOutlined />} value={d.trips_today} to="/challans"
-              foot={<Change now={d.trips_today} before={d.trips_yesterday} label="yesterday" money={false} />} />
+            <TodayTile label="Trips" icon={<CarOutlined />} value={d.trips_today} to={`/challans?date=${day}`}
+              foot={<Change now={d.trips_today} before={d.trips_yesterday} label={before} money={false} />} />
           </Col>
           <Col xs={12} lg={6}>
-            <TodayTile label="Sales" icon={<DollarOutlined />} value={rs(d.sales_today)}
-              foot={<Change now={n(d.sales_today)} before={n(d.sales_yesterday)} label="yesterday" />} />
+            <TodayTile label="Sales" icon={<DollarOutlined />} value={rs(d.sales_today)} to={`/challans?date=${day}`}
+              foot={<Change now={n(d.sales_today)} before={n(d.sales_yesterday)} label={before} />} />
           </Col>
           <Col xs={12} lg={6}>
-            <TodayTile label="Money received" icon={<ArrowDownOutlined style={{ color: GOOD }} />} value={rs(d.money_in_today)} to="/payments"
-              foot={<span className="dash-change">Came into cash and bank today</span>} />
+            <TodayTile label="Money received" icon={<ArrowDownOutlined style={{ color: GOOD }} />} value={rs(d.money_in_today)} to={moneyLink('in')}
+              foot={<span className="dash-change">Came into cash and bank {dayWord}</span>} />
           </Col>
           <Col xs={12} lg={6}>
-            <TodayTile label="Money paid out" icon={<ArrowUpOutlined style={{ color: BAD }} />} value={rs(d.money_out_today)} to="/expenses"
-              foot={<span className="dash-change">Went out of cash and bank today</span>} />
+            <TodayTile label="Money paid out" icon={<ArrowUpOutlined style={{ color: BAD }} />} value={rs(d.money_out_today)} to={moneyLink('out')}
+              foot={<span className="dash-change">Went out of cash and bank {dayWord}</span>} />
           </Col>
         </Row>
       </Section>
@@ -233,10 +254,10 @@ export default function DashboardPage() {
         </Row>
       </Section>
 
-      <Section title="Vehicles and yard" hint="Which vehicles worked today and what material is in the yard">
+      <Section title="Vehicles and yard" hint={`Which vehicles worked ${dayWord} and what material is in the yard now`}>
         <Row gutter={[12, 12]}>
           <Col xs={24} lg={12}>
-            <Card size="small" style={cardStyle} title={`${working} of ${d.vehicles.length} vehicles working today`}>
+            <Card size="small" style={cardStyle} title={`${working} of ${d.vehicles.length} vehicles working ${dayWord}`}>
               {d.vehicles.length === 0 ? <Empty description="No vehicles yet" /> : (
                 <div className="fleet">
                   {d.vehicles.map((v) => (
@@ -252,7 +273,7 @@ export default function DashboardPage() {
               )}
               {d.trips_by_material.length > 0 && (
                 <Typography.Paragraph type="secondary" style={{ margin: '12px 0 0' }}>
-                  Sent out today: {d.trips_by_material.map((m) => `${m.material} ${formatQty(m.qty)} ${m.unit}`).join(' · ')}
+                  Sent out {dayWord}: {d.trips_by_material.map((m) => `${m.material} ${formatQty(m.qty)} ${m.unit}`).join(' · ')}
                 </Typography.Paragraph>
               )}
             </Card>
