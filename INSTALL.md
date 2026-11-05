@@ -90,33 +90,42 @@ Munshi: http://127.0.0.1:5173/accountant/login (sirf isi PC se khulta hai).
 
 ## 7. Backup (bohat zaroori)
 
-Is tareeqe mein backup **khud nahi** hota. Har hafte (ya roz shaam) haath se lein. App chal rahi ho to bhi le sakte hain.
-`C:\hisaab` folder mein PowerShell:
+Backup **khud nahi** hota. **Roz shaam** kaam khatam karke **`backup.bat`** par double-click karein (app khuli ho to bhi chalega).
 
-```powershell
-docker compose -f docker-compose.dev.yml exec -T db pg_dump -U hisaab -Fc -f /tmp/hisaab-backup.dump hisaab
-docker compose -f docker-compose.dev.yml cp db:/tmp/hisaab-backup.dump .\backup-2026-11-05.dump
-```
-
-File ke naam mein us din ki tareekh likhein. Ye file **USB ya Google Drive** par bhi copy karein; sirf isi PC par rahi to PC kharab hone par backup bhi gaya.
+- Saare data ki copy (shuru se us waqt tak) `C:\hisaab\backups\hisaab-2026-11-05_1830.dump` jaisi file mein ban jati hai.
+- Har backup **poori** copy hai. Phir bhi purani files kaam ki hain: koi ghalti der se pata chale to us se pehle ke din par wapas ja sakte hain.
+- **28 din se purani** files khud mit jaati hain; sab se nayi **4** hamesha rehti hain.
+- Hafte mein ek dafa `backups` folder ki nayi file **USB ya Google Drive** par copy karein. Sirf isi PC par rahi to PC kharab hone par backup bhi gaya.
 
 ### Backup wapas daalna (sirf zaroorat par)
 
-Pehle "Hisaab API" window band karein. Phir:
+1. "Hisaab API" aur "Hisaab Web" windows band karein (Docker Desktop chalta rahe).
+2. **`restore.bat`** par double-click. Backup files ki list aati hai (sab se nayi upar); number likh kar Enter.
+   Ya backup file ko seedha `restore.bat` par **drag** karein.
+3. Woh poochti hai "Pakka?": **`haan`** likh kar Enter.
+4. Phir `dev_without_data.bat` chalayein.
 
-```powershell
-docker compose -f docker-compose.dev.yml cp .\backup-2026-11-05.dump db:/tmp/restore.dump
-docker compose -f docker-compose.dev.yml exec -T db pg_restore -U hisaab -d hisaab --clean --if-exists --no-owner /tmp/restore.dump
-```
+`restore.bat` khud:
+- pehle file check karti hai (kharab ho to kuch nahi chhedti),
+- **abhi ke data ka backup** `backups` mein bana leti hai (ghalat file chuni ho to usi se wapas aa sakte hain),
+- daalti "sab ya kuch nahi" hai: beech mein masla aaye to database pehle jaisa rehta hai.
 
-Phir `dev_without_data.bat` dobara chalayein. Is se database **backup wale din par wapas** chala jata hai; us ke baad ki entries chali jati hain.
+Database backup ke waqt par wapas chala jata hai; us ke baad ki entries hat jaati hain. **Login bhi backup wale** aate hain.
+
+### Naye PC par purana data laana
+
+1. Naye PC par section 1 se 4 tak sab karein (install, clone, `.env`, `dev_without_data.bat`). Database khaali banega.
+2. App ki dono windows band karein.
+3. Purane PC ki backup file (USB / Drive se) naye PC ke `C:\hisaab\backups` folder mein rakhein (folder na ho to bana lein).
+4. `restore.bat` par double-click, file chunein, `haan`.
+5. `dev_without_data.bat` chalayein aur **purane login** se andar jayein.
 
 ---
 
 ## 8. Naya update aaye to
 
 1. "Hisaab API" aur "Hisaab Web" windows band karein.
-2. Pehle backup lein (section 7).
+2. Pehle `backup.bat` se backup lein (section 7).
 3. `C:\hisaab` mein: `git pull`
 4. `dev_without_data.bat` par double-click. Database ke naye badlaav khud lag jaate hain.
 

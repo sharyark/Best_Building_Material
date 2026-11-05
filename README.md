@@ -112,8 +112,10 @@ Permissions are checked on **every endpoint** server-side (`require_perm`); the 
 The portal runs on the client's own PC: PostgreSQL in Docker (`docker-compose.dev.yml`), the API and the web app
 directly on the PC, started with `dev_without_data.bat` (never loads demo data; an empty database gets only the
 first admin from `backend/.env`, the cash account and the chart of accounts). Step-by-step guide, including manual
-backup/restore with `pg_dump`/`pg_restore`, in [`INSTALL.md`](INSTALL.md) (Roman Urdu). There are no automatic
-backups and no server deployment in this setup.
+backup/restore, in [`INSTALL.md`](INSTALL.md) (Roman Urdu). Backups are by hand: `backup.bat` / `backup.sh` dumps
+the whole database to `backups/hisaab-<date>_<time>.dump` (checked with `pg_restore -l`), keeping 28 days but never
+fewer than the newest 4 files; `restore.bat` / `restore.sh` puts one back (checks the file, backs up the current data
+first, restores in a single transaction). There is no server deployment in this setup.
 
 ### Migrating from the registers (ARCHITECTURE.md §13)
 
