@@ -51,6 +51,12 @@ class SettlementPreview(BaseModel):
     accrues_on_settlement: bool  # daily labour already accrued per attendance day
     advances_in_period: Decimal
     current_balance: Decimal  # debit-positive: negative = payable to the worker
+    # Salary side of the khata at the end of the period, before this settlement (trip money left out):
+    # + = they owe us (advances, also from earlier months), - = we still owe them from before.
+    carried_forward: Decimal
+    # What is left to pay after this settlement, before any deduction: (gross if it posts now) - carried_forward.
+    # Negative = nothing to pay; they still owe that much, and it comes off next month.
+    net_before_deductions: Decimal
 
 
 class SettlementIn(BaseModel):

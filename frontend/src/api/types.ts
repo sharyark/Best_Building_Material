@@ -294,6 +294,10 @@ export interface SettlementPreview {
   accrues_on_settlement: boolean
   advances_in_period: Decimal
   current_balance: Decimal
+  /** Salary side of the khata at period end, before settling: + = they owe us (advances, also older), - = we owe. */
+  carried_forward: Decimal
+  /** Left to pay after settling, before deductions; negative = nothing to pay, they still owe that much. */
+  net_before_deductions: Decimal
 }
 export interface Settlement {
   id: number

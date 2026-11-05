@@ -38,12 +38,19 @@ def money_moves(db: DB, date: dt.date | None = None, direction: str = "in", fmt:
 
 
 @router.get("/khata/{party_id}", dependencies=[perm("report.khata")])
-def khata(party_id: int, db: DB, date_from: DateFrom = None, date_to: DateTo = None, fmt: Format = "json"):
+def khata(
+    party_id: int,
+    db: DB,
+    date_from: DateFrom = None,
+    date_to: DateTo = None,
+    fmt: Format = "json",
+    history: bool = False,
+):
     """Customer or supplier statement: date-wise bill, wasool / pay and running baqaya."""
     start, end = q.default_range(date_from, date_to)
     if date_from is None:
         start = dt.date(2000, 1, 1)  # a khata defaults to the whole history
-    return respond(q.party_khata(db, party_id, start, end), fmt)
+    return respond(q.party_khata(db, party_id, start, end, history), fmt)
 
 
 @router.get("/khata/{party_id}/share", dependencies=[perm("report.khata")])
@@ -73,9 +80,17 @@ def khata_share(party_id: int, db: DB, date_from: DateFrom = None, date_to: Date
 
 
 @router.get("/staff-khata/{staff_id}", dependencies=[perm("report.labour_khata")])
-def staff_khata(staff_id: int, db: DB, date_from: DateFrom = None, date_to: DateTo = None, fmt: Format = "json"):
+def staff_khata(
+    staff_id: int,
+    db: DB,
+    date_from: DateFrom = None,
+    date_to: DateTo = None,
+    fmt: Format = "json",
+    history: bool = False,
+):
+    """`history=true` also shows the old and reversal lines of edited / voided entries."""
     start, end = q.default_range(date_from, date_to)
-    return respond(q.staff_khata(db, staff_id, start, end), fmt)
+    return respond(q.staff_khata(db, staff_id, start, end, history), fmt)
 
 
 @router.get("/outstanding", dependencies=[perm("report.outstanding")])

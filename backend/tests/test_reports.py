@@ -157,3 +157,26 @@ def test_document_pdfs_and_whatsapp_share(world):
     share = world.get(f"/reports/khata/{world.customer['id']}/share")
     assert share["url"].startswith("https://wa.me/0300111?text=") or share["url"].startswith("https://wa.me/300111")
     assert "10,800.00" in share["message"]
+
+
+def test_khata_shows_each_entry_once_after_edits(world):
+    from tests.conftest import TODAY
+
+    driver = world.driver
+    body = {"date": str(TODAY), "direction": "out", "staff_id": driver["id"], "purpose": "salary",
+            "money_account_id": world.cash["id"], "mode": "cash", "amount": "20000"}  # fmt: skip
+    p = world.post("/payments", body)
+    for purpose in ("trip", "salary"):  # edited twice, as the munshi did
+        r = world.c.put(f"/api/v1/payments/{p['id']}", json={**body, "purpose": purpose, "edit_reason": "purpose fix"},
+                        headers=world.h)  # fmt: skip
+        assert r.status_code == 200, r.text
+
+    clean = world.get(f"/reports/staff-khata/{driver['id']}")
+    payments = [r for r in clean["rows"] if r["type"] == "Payment"]
+    assert len(payments) == 1 and "salary" in payments[0]["narration"]
+    assert clean["totals"]["debit"] == "20000.00"  # not 60,000
+    assert world.balance(driver["account_id"]) == "20000.0"
+
+    full = world.get(f"/reports/staff-khata/{driver['id']}", history="true")
+    assert len([r for r in full["rows"] if r["type"] == "Payment"]) == 5  # first + 2 reversals + 2 new
+    assert full["rows"][-1]["balance"] == clean["rows"][-1]["balance"]  # same baqaya either way

@@ -1,5 +1,5 @@
 import { FileExcelOutlined, FilePdfOutlined, WhatsAppOutlined } from '@ant-design/icons'
-import { Alert, App, Button, Select, Space } from 'antd'
+import { Alert, App, Button, Checkbox, Select, Space } from 'antd'
 import dayjs from 'dayjs'
 import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
@@ -28,6 +28,7 @@ function params(cfg: ReportConfig, v: ReportValues): Record<string, string | num
   if (cfg.filters.includes('groupBy')) p.group_by = v.group
   if (cfg.filters.includes('outstandingKind')) p.kind = v.kind
   if (cfg.filters.includes('direction')) p.direction = v.direction
+  if (cfg.filters.includes('history') && v.history) p.history = 'true'
   return p
 }
 
@@ -45,6 +46,7 @@ export default function ReportPage({ config, embedded = false }: { config: Repor
     group: config.groupOptions?.[0]?.value ?? 'month',
     kind: 'receivable',
     direction: search.get('direction') === 'out' ? 'out' : 'in',
+    history: false,
   }))
   const set = (patch: Partial<ReportValues>) => setValues((v) => ({ ...v, ...patch }))
   const ready = (config.needs ?? []).every((n) => values[n])
@@ -81,6 +83,9 @@ export default function ReportPage({ config, embedded = false }: { config: Repor
         {config.filters.includes('range') && <DateRangeField value={values.range} onChange={(range) => set({ range })} />}
         {(config.filters.includes('date') || config.filters.includes('asOf')) && <div style={{ width: 160 }}><DateField value={values.date} onChange={(date) => set({ date })} /></div>}
         {config.filters.includes('groupBy') && <Select style={{ width: 170 }} value={values.group} onChange={(group) => set({ group })} options={config.groupOptions} />}
+        {config.filters.includes('history') && (
+          <Checkbox checked={values.history} onChange={(e) => set({ history: e.target.checked })}>Edit / void ki purani lines bhi dikhao</Checkbox>
+        )}
         {config.filters.includes('direction') && (
           <Select style={{ width: 190 }} value={values.direction} onChange={(direction) => set({ direction })} options={[{ value: 'in', label: 'Money received' }, { value: 'out', label: 'Money paid out' }]} />
         )}
