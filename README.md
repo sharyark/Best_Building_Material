@@ -9,10 +9,9 @@ The design is in [`ARCHITECTURE.md`](ARCHITECTURE.md). This repo implements it.
 ```
 backend/    FastAPI + SQLAlchemy 2 + Alembic (PostgreSQL 17)      → API, posting engine, reports, PDF/Excel
 frontend/   React 18 + Vite + TypeScript + Ant Design 5            → the portal UI
-deploy/     Caddyfile, backup container (pg_dump, retention, off-site, restore test)
-docker-compose.yml          production stack (caddy + api + db + backup)
-docker-compose.staging.yml  staging override (own DB / volumes / port)
-.github/workflows/ci.yml    lint + tests + image build + SSH deploy
+docker-compose.dev.yml      PostgreSQL 17 for the local stack (the only container)
+dev.sh / dev.bat            local stack with demo data; dev_without_data.sh / .bat = same, never adds demo data
+.github/workflows/ci.yml    lint + tests (PostgreSQL) + migration check
 ```
 
 ## The one idea that matters: hidden double-entry
@@ -108,27 +107,13 @@ API: `/api/v1/...`, OpenAPI at `/api/docs` (admin-only with `?token=` when `ENV=
 Permissions are checked on **every endpoint** server-side (`require_perm`); the UI only hides buttons.
 `driver` and `customer` roles exist in the schema and permission map but have no screens yet (phase 3).
 
-## Deploy (one VPS, Docker Compose + Caddy)
+## Running at the client
 
-```bash
-git clone <repo> /srv/hisaab && cd /srv/hisaab
-cp .env.example .env && nano .env          # DOMAIN, POSTGRES_PASSWORD, POSTGRES_ADMIN_PASSWORD, JWT_SECRET (openssl rand -base64 48), admin login
-docker compose up -d --build               # Caddy gets the HTTPS certificate automatically
-```
-
-* `api` runs `alembic upgrade head` and `app.bootstrap` on every start, then gunicorn + uvicorn workers.
-* Postgres has **no published port**; only Caddy exposes 80/443. The app connects as a restricted role (not a
-  superuser, owns only its own database); a separate admin login exists for restore tests. Secrets live in `.env`
-  (git-ignored).
-* **Backups**: the `backup` container dumps nightly at 02:00 (gzip-verified), keeps 30 daily + 12 monthly, and
-  copies them off-site if `BACKUP_OFFSITE_REMOTE` is set (any rclone remote: Backblaze B2, S3…). On the 1st of each
-  month at 04:00 it **restores the newest dump into a scratch database and checks the books balance**; it fails loudly
-  if the backup is unusable. Run it by hand any time: `docker compose exec backup /scripts/restore-test.sh`.
-* **Staging** (same VPS, separate DB/volumes, plain HTTP on :8080):
-  `docker compose -p hisaab-staging -f docker-compose.yml -f docker-compose.staging.yml --env-file .env.staging up -d --build`
-* **CI/CD**: `.github/workflows/ci.yml` lints, tests (on PostgreSQL), checks that migrations match the models, builds
-  the images, and deploys over SSH on pushes to `main` (production) / `staging`. Set repo secrets
-  `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_SSH_KEY`; without them the deploy step is skipped.
+The portal runs on the client's own PC: PostgreSQL in Docker (`docker-compose.dev.yml`), the API and the web app
+directly on the PC, started with `dev_without_data.bat` (never loads demo data; an empty database gets only the
+first admin from `backend/.env`, the cash account and the chart of accounts). Step-by-step guide, including manual
+backup/restore with `pg_dump`/`pg_restore`, in [`INSTALL.md`](INSTALL.md) (Roman Urdu). There are no automatic
+backups and no server deployment in this setup.
 
 ### Migrating from the registers (ARCHITECTURE.md §13)
 
@@ -162,8 +147,7 @@ The schema supports every option; these are only defaults and are easy to change
   included in the material rate (freight left at 0), a trolley shows cost with no revenue. Decide with the client.
 * Editing a challan/purchase re-prices its stock effect at the *current* average cost, not the historical one, and
   voiding a purchase is refused if its material has already been sold (void the sales first).
-* Login rate limiting counts attempts per IP in the database (so it holds across workers); behind Caddy the real
-  client IP comes from `X-Forwarded-For`.
+* Login rate limiting counts attempts per IP in the database (so it holds across workers).
 * Excel/PDF exports are generic tables (no company letterhead/logo yet); challan, bill and voucher PDFs are basic
   A5/A4 layouts.
 * Urdu/Hindi: the i18n structure (`frontend/src/i18n`) and RTL switch exist, but only English strings are provided,

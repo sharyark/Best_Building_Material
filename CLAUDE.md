@@ -8,7 +8,7 @@ Hisaab Portal replaces the paper registers of a small construction-material supp
 
 Two users, two login pages: the **owner/admin** (`/admin/login`: everything, including void, profit reports, users, opening balances, month lock, audit) and the **munshi/accountant** (`/accountant/login`: daily entries and edits only, no void or profit). `driver` and `customer` roles exist in the schema but their apps (phase 3) are not built.
 
-`ARCHITECTURE.md` is the spec; `README.md` has deploy/backup/CI details and the defaults chosen for open client questions; `INSTALL.md` is a non-developer Docker install guide and `MANUAL.md` a user manual (both Roman Urdu); keep MANUAL.md's numbers in step with `app/seed_small.py`.
+`ARCHITECTURE.md` is the spec (its VPS/Caddy deployment plan is no longer used); `README.md` has the run/CI details and the defaults chosen for open client questions; `INSTALL.md` is the client-PC setup guide and `MANUAL.md` a user manual (both Roman Urdu); keep MANUAL.md's numbers in step with `app/seed_small.py`.
 
 ## Commands
 
@@ -62,7 +62,7 @@ E2E gotcha: login is rate-limited to 5/min/IP (DB-backed), so a full run can tri
 
 **Frontend.** `src/app/` holds router (lazy routes, `RequireAuth`), `AuthContext` (`useAuth().can(perm)`, `usePermission`) and layout. `src/features/<area>/` per screen; shared building blocks in `src/components/` (`Field` with id-linked labels, `EntitySelect` with inline quick-add via `QuickAdd.tsx`, `DocPage`, `DocFormShell`, `ReportView`, `StatCard`/`HeroBanner`); `ReportPage` is in `features/reports/` and `CrudTable` (masters lists) in `features/masters/`. Data via TanStack Query; after any save, invalidate all queries (balances are cross-cutting). Forms are RHF + Zod. UI hides actions by permission, but the server is the real gate. Currency/locale come from `VITE_CURRENCY`/`VITE_LOCALE`; i18n scaffolding is English-only.
 
-**Deploy.** `docker-compose.yml` = caddy + api + db + backup; the api container runs `alembic upgrade head` and `app.bootstrap` on start; the app uses a restricted Postgres role. CI (`.github/workflows/ci.yml`) lints, tests on Postgres, builds images, deploys over SSH: pushes to `main` go to production, pushes to `staging` go to a separate stack (`docker-compose.staging.yml`, `.env.staging`).
+**Deploy.** There is no server deployment: the portal runs on the client's PC with `dev_without_data.bat` (PostgreSQL in Docker via `docker-compose.dev.yml`, API and Vite directly on the PC; `alembic upgrade head` + `app.bootstrap` on every start, never demo data). Backups are manual `pg_dump`/`pg_restore` (`INSTALL.md`). CI (`.github/workflows/ci.yml`) only lints, tests on Postgres and checks migrations; it builds and deploys nothing.
 
 ## What belongs where
 
@@ -83,7 +83,7 @@ E2E gotcha: login is rate-limited to 5/min/IP (DB-backed), so a full run can tri
 | Permission/debounce hooks | `frontend/src/hooks/` |
 | UI strings scaffolding | `frontend/src/i18n/` |
 | Browser tests | `frontend/e2e/`; unit tests sit beside the file (`*.test.ts(x)`) |
-| Deploy | `docker-compose*.yml`, `deploy/` (Caddyfile, backup scripts), `.github/workflows/ci.yml` |
+| Running it (local and at the client), CI | `docker-compose.dev.yml`, `dev*.sh` / `dev*.bat` / `dev.ps1`, `INSTALL.md`, `.github/workflows/ci.yml` |
 
 Layering rule (backend): router → service → posting engine/models. Routers only validate, authorise and call services; services hold business rules and call `posting.py`; nothing but `posting.py` creates journal rows.
 

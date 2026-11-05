@@ -51,7 +51,7 @@ The schema and permission system include the Driver and Customer roles from day 
 | PDF | **WeasyPrint** (HTML → PDF) | Khata statements, bills, challans |
 | Excel | **openpyxl** | Export of any report |
 | Database | **PostgreSQL 17** | See section 3 |
-| Deploy | **Docker Compose on 1 VPS + Caddy** (auto HTTPS) | Cheap, simple, enough for this scale |
+| Deploy | Originally planned: Docker Compose on 1 VPS + Caddy. **Now: runs on the client's PC** (see §12) | Client's choice; no server cost |
 
 ---
 
@@ -379,6 +379,8 @@ All reports can be exported to Excel and PDF.
 ---
 
 ## 12. Deployment
+
+> **Current setup:** the portal runs on the client's PC: PostgreSQL in Docker (`docker-compose.dev.yml`), API and web app directly on the PC via `dev_without_data.bat`, manual backups (`INSTALL.md`). The VPS / Caddy / backup-container plan below was the original design; its files were removed.
 
 ```
 docker-compose.yml
