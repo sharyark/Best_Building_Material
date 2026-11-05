@@ -12,7 +12,7 @@ Two users, two login pages: the **owner/admin** (`/admin/login`: everything, inc
 
 ## Commands
 
-One-shot local stack: `./dev.sh` (or `dev.ps1`/`dev.bat` on Windows) starts the dev Postgres, creates `backend/.venv` + `backend/.env` on first run, migrates, seeds, and runs API (:8000) and web (:5173). Run it, don't `source` it.
+One-shot local stack: `./dev.sh` (or `dev.ps1`/`dev.bat` on Windows) starts the dev Postgres, creates `backend/.venv` + `backend/.env` on first run, migrates, seeds, and runs API (:8000) and web (:5173). Run it, don't `source` it. `./dev_without_data.sh` / `dev_without_data.bat` (= `dev.sh --no-demo`, `dev.ps1 -NoDemo`) do the same but never load demo data: only `app.bootstrap` (first admin, cash account, chart), existing data untouched.
 
 Backend (`cd backend && source .venv/bin/activate`):
 ```bash
