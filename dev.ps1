@@ -4,6 +4,10 @@
 # The API and web app open in their own windows; close those windows to stop them.
 #   docker compose -f docker-compose.dev.yml down   # to stop the DB too
 
+# -NoDemo (or double-click dev_without_data.bat) never loads demo data: an empty database gets only the
+# first admin login, the cash account and the chart of accounts; a database with data is left as it is.
+param([switch]$NoDemo)
+
 $ErrorActionPreference = "Stop"
 $Root = $PSScriptRoot
 Set-Location $Root
@@ -69,8 +73,14 @@ Step "Migrating database"
 & $VenvPy -m alembic upgrade head
 if ($LASTEXITCODE -ne 0) { Fail "Database migration failed (see the messages above)." }
 
-Step "Loading demo data (skipped if the database already has data)"
-& $VenvPy -m app.seed
+if ($NoDemo) {
+    Step "No demo data: making sure the first admin, cash account and chart exist"
+    & $VenvPy -m app.bootstrap
+    if ($LASTEXITCODE -ne 0) { Fail "Setting up the first admin failed (see the messages above)." }
+} else {
+    Step "Loading demo data (skipped if the database already has data)"
+    & $VenvPy -m app.seed
+}
 
 Set-Location "$Root\frontend"
 if (-not (Test-Path "node_modules")) {
@@ -97,8 +107,13 @@ Start-Process "http://127.0.0.1:5173/admin/login"
 Write-Host ""
 Write-Host "Hisaab Portal is starting:" -ForegroundColor Green
 Write-Host "  Web app : http://127.0.0.1:5173"
-Write-Host "  Owner   : http://127.0.0.1:5173/admin/login       (admin / admin12345)"
-Write-Host "  Munshi  : http://127.0.0.1:5173/accountant/login  (munshi / munshi12345)"
+if ($NoDemo) {
+    Write-Host "  Owner   : http://127.0.0.1:5173/admin/login       (BOOTSTRAP_ADMIN_PHONE / _PASSWORD in backend\.env)"
+    Write-Host "  Munshi  : http://127.0.0.1:5173/accountant/login  (create the munshi in Admin > Users)"
+} else {
+    Write-Host "  Owner   : http://127.0.0.1:5173/admin/login       (admin / admin12345)"
+    Write-Host "  Munshi  : http://127.0.0.1:5173/accountant/login  (munshi / munshi12345)"
+}
 Write-Host "  API docs: http://127.0.0.1:8000/api/docs"
 Write-Host ""
 Write-Host "Close the 'Hisaab API' and 'Hisaab Web' windows to stop."
