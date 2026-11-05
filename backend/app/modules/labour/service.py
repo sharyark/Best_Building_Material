@@ -91,6 +91,16 @@ def list_attendance(db: Session, date_from: dt.date, date_to: dt.date, staff_id:
     return db.scalars(stmt.order_by(Attendance.date, Attendance.staff_id)).all()
 
 
+def _salary_side_before(db: Session, staff: Staff, period_to: dt.date) -> Decimal:
+    """The worker's khata at the end of the period without the trip money (which is paid weekly on its own):
+    advances from any month, earlier salary still unpaid, daily wages already earned. Debit-positive."""
+    from app.modules.reports.queries import trip_money  # reports imports labour models; keep this lazy
+
+    balance = balance_of(db, staff.account_id, upto=period_to)
+    trip_owed = trip_money(db, staff, period_to, period_to)["balance"]
+    return money(balance + trip_owed)
+
+
 def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date) -> SettlementPreview:
     staff = get_or_404(db, Staff, staff_id, "Staff")
     rows = db.scalars(
@@ -136,6 +146,7 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
             Payment.date <= period_to,
         )
     )
+    carried = _salary_side_before(db, staff, period_to)
     return SettlementPreview(
         staff_id=staff_id,
         period_from=period_from,
@@ -151,6 +162,8 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
         accrues_on_settlement=staff.wage_type != "daily",
         advances_in_period=money(advances or 0),
         current_balance=balance_of(db, staff.account_id),
+        carried_forward=carried,
+        net_before_deductions=money((gross if staff.wage_type != "daily" else ZERO) - carried),
     )
 
 
@@ -195,7 +208,8 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
         advances_adjusted=advances,
         deductions=data.deductions,
         deduction_reason=reason if data.deductions > 0 else None,
-        net_payable=money(pv.gross - advances - data.deductions),
+        # From the khata, so an advance from an earlier month is counted too (not only this period's).
+        net_payable=money(pv.net_before_deductions - data.deductions),
         notes=data.notes,
         client_ref=data.client_ref,
     )

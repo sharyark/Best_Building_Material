@@ -56,8 +56,8 @@ export default function Settlements() {
     }
   }
 
-  // Advances come from Payments (purpose Advance), so the settlement always agrees with the khata.
-  const net = preview ? Number(preview.gross) - Number(preview.advances_in_period) - Number(deductions || 0) : 0
+  // From the khata: advances from any month (entered in Payments) and pay still owed from before both count.
+  const net = preview ? Number(preview.net_before_deductions) - Number(deductions || 0) : 0
   const absent = Number(preview?.absent_days ?? 0)
   const reasonText = [reason === 'Other' ? '' : reason, detail.trim()].filter(Boolean).join(': ')
   function pickReason(r: string) {
@@ -108,13 +108,13 @@ export default function Settlements() {
               <>
               <Space wrap align="end" style={{ marginTop: 12 }}>
                 <div>
-                  <div>Advance (from Payments)</div>
-                  <div className="settle-advance"><Money value={preview.advances_in_period} bold /></div>
+                  <div>Advance / pichla baqaya</div>
+                  <div className="settle-advance"><Money value={preview.carried_forward} drcr bold /></div>
                 </div>
                 <label htmlFor="cut-amount">Katoti (deduction)<div style={{ width: 170 }}><MoneyInput id="cut-amount" value={deductions} onChange={setDeductions} /></div></label>
                 <label htmlFor="cut-reason">Katoti ki wajah<div style={{ width: 200 }}><Select id="cut-reason" style={{ width: '100%' }} placeholder="Choose reason" value={reason} onChange={pickReason} options={REASONS} allowClear onClear={() => setReason(undefined)} /></div></label>
                 <label htmlFor="cut-detail">Detail<div style={{ width: 220 }}><Input id="cut-detail" value={detail} onChange={(e) => setDetail(e.target.value)} maxLength={80} placeholder="e.g. 2 din, tyre phata" /></div></label>
-                <b>Net payable: <Money value={net} bold /></b>
+                <b>{net >= 0 ? <>Net payable: <Money value={net} bold /></> : <>Dena: 0 · <span style={{ color: '#b45309' }}><Money value={-net} /> us ne wapas karna hai (agle mahine kategi)</span></>}</b>
                 <Button type="primary" loading={save.isPending}
                   onClick={() => {
                     if (Number(deductions) > 0 && !reasonText) { message.warning('Choose why the pay is cut (Chutti, Jurmana...) so it shows in the khata.'); return }
@@ -122,7 +122,7 @@ export default function Settlements() {
                   }}>Save settlement</Button>
               </Space>
               <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
-                Advance dena ho to pehle Payments &gt; New payment (money out) mein Purpose "Advance" se darj karein; yahan khud aa jayega.
+                "Advance / pichla baqaya" khata se aata hai: har mahine ka advance (Payments &gt; Purpose "Advance") aur pichle mahine ka bacha hua hisaab. Is mein "lena" = us ne wapas karna hai, "dena" = hum ne pichla dena hai.
               </Typography.Text>
               {reason === 'Chutti' && preview.day_rate && (
                 <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>

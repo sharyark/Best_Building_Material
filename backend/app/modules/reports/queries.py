@@ -72,8 +72,13 @@ def ledger(
     date_to: dt.date,
     subtitle: str | None = None,
     sides: tuple[str, str] = ("Bill", "Wasool"),
+    history: bool = False,
 ) -> ReportTable:
-    """Date-wise entries with a running balance computed by a window function (debit-positive: + = lena)."""
+    """Date-wise entries with a running balance computed by a window function (debit-positive: + = lena).
+
+    An edit or void posts a reversal of the old entry on the same day. By default both halves are left out, so
+    the khata shows each document once, as it stands now; the balance is the same either way because the pair
+    cancels on that day. `history=True` shows every line (the record itself is never deleted)."""
     running = (
         func.sum(JournalLine.debit - JournalLine.credit)
         .over(order_by=[JournalEntry.date, JournalEntry.id, JournalLine.id])
@@ -91,8 +96,11 @@ def ledger(
         )
         .join(JournalEntry, JournalEntry.id == JournalLine.journal_id)
         .where(JournalLine.account_id == account_id)
-        .subquery()
     )
+    if not history:
+        reversed_ids = select(JournalEntry.reverses_id).where(JournalEntry.reverses_id.is_not(None))
+        inner = inner.where(JournalEntry.reverses_id.is_(None), JournalEntry.id.not_in(reversed_ids))
+    inner = inner.subquery()
     lines = db.execute(
         select(inner).where(inner.c.date >= date_from, inner.c.date <= date_to).order_by(inner.c.date, inner.c.jid)
     ).all()
@@ -133,22 +141,27 @@ def ledger(
     )
 
 
-def party_khata(db: Session, party_id: int, date_from: dt.date, date_to: dt.date) -> ReportTable:
+def party_khata(db: Session, party_id: int, date_from: dt.date, date_to: dt.date, history: bool = False) -> ReportTable:
     party = db.get(Party, party_id)
     if party is None:
         raise NotFound("Party not found")
     kind = "Supplier" if party.type == "supplier" else "Customer"
-    table = ledger(db, party.account_id, f"{kind} khata - {party.name}", date_from, date_to, sides=SIDES[party.type])
+    table = ledger(
+        db, party.account_id, f"{kind} khata - {party.name}", date_from, date_to, sides=SIDES[party.type],
+        history=history,
+    )  # fmt: skip
     table.meta.update(party_id=party.id, party_name=party.name, phone=party.phone)
     return table
 
 
-def staff_khata(db: Session, staff_id: int, date_from: dt.date, date_to: dt.date) -> ReportTable:
+def staff_khata(db: Session, staff_id: int, date_from: dt.date, date_to: dt.date, history: bool = False) -> ReportTable:
     """Worker / driver khata: ledger plus attendance, wages earned and advances for the period."""
     staff = db.get(Staff, staff_id)
     if staff is None:
         raise NotFound("Staff member not found")
-    table = ledger(db, staff.account_id, f"Labour khata - {staff.name}", date_from, date_to, sides=SIDES["staff"])
+    table = ledger(
+        db, staff.account_id, f"Labour khata - {staff.name}", date_from, date_to, sides=SIDES["staff"], history=history
+    )
     counts = {"present": 0, "half": 0, "absent": 0}
     for status, n in db.execute(
         select(Attendance.status, func.count())

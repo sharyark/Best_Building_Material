@@ -201,3 +201,31 @@ def test_settlement_uses_entered_advances_and_explains_an_overlap(world):
     err = world.post("/labour/settlements", body, expect=409)
     assert err["code"] == "PERIOD_OVERLAP" and "Ali Driver is already settled for" in err["message"]
     assert "Payments" in err["message"]
+
+
+def test_advance_bigger_than_pay_carries_into_next_month(world):
+    import datetime as dt
+
+    worker = world.post("/masters/staff", {"name": "Karim", "role": "labour", "wage_type": "monthly",
+                                           "wage_amount": "5000"})  # fmt: skip
+    this_month = TODAY.replace(day=1)
+    last_month = (this_month - dt.timedelta(days=1)).replace(day=1)
+    last_month_end = this_month - dt.timedelta(days=1)
+    world.post("/payments", {"date": str(last_month), "direction": "out", "staff_id": worker["id"],
+                             "purpose": "advance", "money_account_id": world.cash["id"], "mode": "cash",
+                             "amount": "10000"})  # fmt: skip
+
+    # month 1: 5,000 pay against a 10,000 advance -> nothing to pay, 5,000 still owed by him
+    s1 = world.post("/labour/settlements", {"staff_id": worker["id"], "period_from": str(last_month),
+                                            "period_to": str(last_month_end)})  # fmt: skip
+    assert s1["net_payable"] == "-5000.00"
+    assert world.balance(worker["account_id"]) == "5000.0"
+
+    # month 2: no new advance, but last month's 5,000 still comes off -> 0 to pay (not 5,000)
+    pv = world.get("/labour/settlements/preview", staff_id=worker["id"], period_from=str(this_month),
+                   period_to=str(TODAY))  # fmt: skip
+    assert pv["advances_in_period"] == "0.00" and pv["carried_forward"] == "5000.00"
+    assert pv["net_before_deductions"] == "0.00"
+    s2 = world.post("/labour/settlements", {"staff_id": worker["id"], "period_from": str(this_month),
+                                            "period_to": str(TODAY)})  # fmt: skip
+    assert s2["net_payable"] == "0.00" and world.balance(worker["account_id"]) == "0.0"
