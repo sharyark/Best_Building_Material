@@ -155,7 +155,9 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
           extra_rate: delivery.extra_rate ? String(delivery.extra_rate) : '',
           pay: 'credit', paid_amount: '', money_account_id: null,
         }
-      : blank(readLast()),
+      // A new challan opens on today's date (vehicle and driver are remembered); after "Save & next" the date just
+      // used is kept, so a batch of back-dated challans needs the date picked only once.
+      : blank({ ...readLast(), date: undefined }),
   })
   const [date, customerId, materialId, qty, rate, freight, loadSize, withCement, otherHalfId, extraQty, extraRate, pay, paidAmount, moneyAccountId] = useWatch({
     control,
