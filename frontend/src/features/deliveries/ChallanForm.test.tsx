@@ -2,6 +2,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { render, screen, waitFor } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { App as AntApp } from 'antd'
+import dayjs from 'dayjs'
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios'
 import { api } from '@/api/client'
 import type { Delivery } from '@/api/types'
@@ -229,6 +230,13 @@ describe('ChallanForm payment (new challan)', () => {
     await userEvent.type(screen.getByLabelText('Trolleys'), '2')
     await waitFor(() => expect(screen.getByText(/^Total:/).textContent).toMatch(/6,000/))
   }
+
+  it('opens on today even if the last challan was on an older date', async () => {
+    localStorage.setItem('hisaab.challan.last', JSON.stringify({ date: '2026-01-15', vehicle_type: 'tractor_trolley' }))
+    setup([])
+    renderForm(vi.fn(), null)
+    expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe(dayjs().format('DD-MM-YYYY'))
+  })
 
   it('warns when the advance runs out and "Take more advance" receives the shortfall', async () => {
     khataBalance = '-5000.00'
