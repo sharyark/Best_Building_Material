@@ -4,7 +4,7 @@ import datetime as dt
 from collections import defaultdict
 from decimal import Decimal
 
-from sqlalchemy import case, func, or_, select
+from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.orm import Session
 
 from app.accounting.balances import account_balances, oldest_unpaid_dates
@@ -199,9 +199,9 @@ def staff_khata(db: Session, staff_id: int, date_from: dt.date, date_to: dt.date
         salary_balance=balance_payable - trip["balance"],
         salary_paid=Decimal(
             db.scalar(
-                select(func.sum(Payment.amount)).where(
+                select(func.sum(Payment.amount - Payment.trip_amount)).where(
                     Payment.staff_id == staff_id,
-                    Payment.purpose == "salary",
+                    Payment.purpose.in_(("salary", "sal_trip")),
                     Payment.direction == "out",
                     Payment.status == "active",
                     Payment.date >= date_from,
@@ -252,15 +252,17 @@ def trip_money(db: Session, staff: Staff, date_from: dt.date, date_to: dt.date) 
         return Decimal(db.scalar(q.where(JournalEntry.date >= since) if since else q) or 0)
 
     def paid(since: dt.date | None) -> Decimal:
-        q = select(func.sum(Payment.amount)).where(
-            Payment.staff_id == staff.id, Payment.purpose == "trip", Payment.direction == "out",
+        # A 'salary + trip' payment counts only its trip part here.
+        part = case((Payment.purpose == "trip", Payment.amount), else_=Payment.trip_amount)
+        q = select(func.sum(part)).where(
+            Payment.staff_id == staff.id, Payment.purpose.in_(("trip", "sal_trip")), Payment.direction == "out",
             Payment.status == "active", Payment.date <= date_to,
         )  # fmt: skip
         return Decimal(db.scalar(q.where(Payment.date >= since) if since else q) or 0)
 
     trips = 0
     for model, who, extra in (
-        (Delivery, Delivery.driver_id, []),
+        (Delivery, Delivery.driver_id, [Delivery.delivered.is_(True)]),
         (Purchase, Purchase.driver_id, [Purchase.transport_by == "own"]),
         (Rental, Rental.operator_id, []),
     ):
@@ -454,7 +456,7 @@ def vehicle_pnl(db: Session, date_from: dt.date, date_to: dt.date) -> ReportTabl
     trips = dict(
         db.execute(
             select(Delivery.vehicle_id, func.sum(Delivery.trips)).where(
-                Delivery.status == "active", Delivery.vehicle_id.is_not(None),
+                Delivery.status == "active", Delivery.delivered.is_(True), Delivery.vehicle_id.is_not(None),
                 Delivery.date >= date_from, Delivery.date <= date_to,
             ).group_by(Delivery.vehicle_id)
         ).all()
@@ -570,7 +572,12 @@ def material_margin(db: Session, date_from: dt.date, date_to: dt.date) -> Report
     }
     # Quantities in the material's own unit (stock_qty), so dumper/bucket loads add up with trolleys.
     sold: dict[int, list[Decimal]] = {}
-    active = (Delivery.status == "active", Delivery.date >= date_from, Delivery.date <= date_to)
+    active = (
+        Delivery.status == "active",
+        Delivery.delivered.is_(True),
+        Delivery.date >= date_from,
+        Delivery.date <= date_to,
+    )
     for cols in (
         (Delivery.material_id, Delivery.stock_qty, Delivery.sale_amount, Delivery.cost_amount),
         (Delivery.extra_material_id, Delivery.extra_qty, Delivery.extra_amount, Delivery.extra_cost_amount),
@@ -885,7 +892,8 @@ def dashboard(db: Session, *, with_profit: bool = False, on: dt.date | None = No
     cash = sum((money_bal.get(m.account_id, ZERO) for m in money_accounts if m.kind == "cash"), ZERO)
     bank = sum((money_bal.get(m.account_id, ZERO) for m in money_accounts if m.kind != "cash"), ZERO)
 
-    active = Delivery.status == "active"
+    # Pending orders are not sales yet: they count once delivered.
+    active = and_(Delivery.status == "active", Delivery.delivered.is_(True))
     challan_total = Delivery.sale_amount + Delivery.freight_amount + Delivery.extra_amount
 
     def sales_between(start: dt.date, end: dt.date) -> Decimal:
@@ -1010,6 +1018,10 @@ def dashboard(db: Session, *, with_profit: bool = False, on: dt.date | None = No
         "trips_today": trips_on(today),
         "trips_yesterday": trips_on(yesterday),
         "trips_by_material": trips_by_material,
+        # Orders with a challan that are not delivered yet (any date), so none is forgotten.
+        "pending_orders": db.scalar(
+            select(func.count()).where(Delivery.status == "active", Delivery.delivered.is_(False))
+        ),
         "sales_today": str(sales_between(today, today)),
         "sales_yesterday": str(sales_between(yesterday, yesterday)),
         "sales_month": str(sales_between(month_from, today)),
@@ -1109,15 +1121,16 @@ def challan_register(
                 "paid_now": paid.get(d.receipt_id),
                 "vehicle": vehicle.get(d.vehicle_id, ""),
                 "driver": staff.get(d.driver_id, ""),
-                "status": "Void" if d.status == "void" else "Active",
+                "status": "Void" if d.status == "void" else ("Delivered" if d.delivered else "Pending"),
                 "void_reason": d.void_reason or "",
                 "edited": _edited(d),
                 "notes": d.notes or "",
             }
         )
-    active = [r for d, r in zip(deliveries, rows, strict=True) if d.status == "active"]
+    # Totals match the khata: only delivered challans are in it.
+    active = [r for d, r in zip(deliveries, rows, strict=True) if d.status == "active" and d.delivered]
     totals = {
-        "challan_no": f"Total ({len(active)} active)",
+        "challan_no": f"Total ({len(active)} delivered)",
         **{k: sum((r[k] or ZERO for r in active), ZERO) for k in ("sale_amount", "extra_amount", "freight", "total")},
         "paid_now": sum((r["paid_now"] or ZERO for r in active), ZERO),
     }

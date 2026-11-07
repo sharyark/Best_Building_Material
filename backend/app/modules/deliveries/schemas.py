@@ -39,7 +39,14 @@ class DeliveryIn(EditableIn):
     allow_negative_stock: bool = False
     # Only used when creating; later payments are entered on the Payments screen.
     payment: ChallanPaymentIn | None = None
+    # False = an order: saved and printable, but not in the khata, trip pay or stock until marked delivered.
+    # Defaults to true so API callers that predate orders keep posting at once.
+    delivered: bool = True
     client_ref: uuid.UUID | None = None
+
+
+class DeliverIn(BaseModel):
+    allow_negative_stock: bool = False
 
 
 class DeliveryOut(EditInfoOut):
@@ -77,3 +84,5 @@ class DeliveryOut(EditInfoOut):
     status: str
     void_reason: str | None
     notes: str | None
+    delivered: bool
+    delivered_at: dt.datetime | None

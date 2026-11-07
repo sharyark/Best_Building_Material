@@ -1,3 +1,4 @@
+import datetime as dt
 import math
 from decimal import Decimal
 
@@ -9,7 +10,7 @@ from app.accounting.chart import Chart
 from app.accounting.posting import ensure_period_open, post, reverse
 from app.accounting.sequences import next_doc_no
 from app.core.db import ZERO
-from app.core.errors import Conflict, DomainError, NotFound
+from app.core.errors import Conflict, DomainError, Forbidden, NotFound
 from app.core.money import money
 from app.core.money import qty as q3
 from app.core.pagination import ListParams, apply_sort, paginate
@@ -78,6 +79,7 @@ def _ensure_not_invoiced(delivery: Delivery) -> None:
 def _apply(
     db: Session, d: Delivery, data: DeliveryIn, customer: Party, material: Material, extra: Material | None
 ) -> None:
+    """Copy the form onto the challan. Nothing is posted here: see `_post`."""
     rate = data.sale_rate or masters.lookup_sale_rate(db, customer.id, material.id, data.date, data.load_unit).rate
     qty = q3(data.qty * HALF) if data.load_size == "half" else data.qty
     d.date = data.date
@@ -95,18 +97,10 @@ def _apply(
     d.vehicle_id = data.vehicle_id
     d.driver_id = data.driver_id
     d.trips = trips_of(data, material)
-    d.trip_pay, driver_account = masters.trip_pay_for(db, data.driver_id, data.trip_pay, d.trips)
+    d.trip_pay, _ = masters.trip_pay_for(db, data.driver_id, data.trip_pay, d.trips)
     d.notes = data.notes
-    db.flush()
-    _, cost_rate, cost_amount = stock.issue(
-        db, date=data.date, material_id=material.id, qty=d.stock_qty, source_type="delivery", source_id=d.id,
-        allow_negative=data.allow_negative_stock,
-    )  # fmt: skip
-    d.cost_rate = cost_rate
-    d.cost_amount = cost_amount
-    narration = f"Challan {d.challan_no}: {qty} {d.unit} {material.name}"
     d.extra_material_id = d.extra_qty = d.extra_unit = d.extra_rate = None
-    d.extra_amount = d.extra_cost_amount = money(ZERO)
+    d.extra_amount = money(ZERO)
     if extra is not None and data.extra_qty:
         extra_rate = data.extra_rate or masters.lookup_sale_rate(db, customer.id, extra.id, data.date).rate
         d.extra_material_id = extra.id
@@ -114,28 +108,55 @@ def _apply(
         d.extra_unit = extra.unit
         d.extra_rate = extra_rate
         d.extra_amount = money(data.extra_qty * extra_rate)
+    # Cost is only known when the material actually leaves the yard (at the average cost of that moment).
+    d.cost_rate = d.cost_amount = d.extra_cost_amount = money(ZERO)
+    db.flush()
+
+
+def _post(db: Session, d: Delivery, allow_negative: bool) -> None:
+    """A delivered challan: take the material out of stock and post the khata + trip pay entry."""
+    customer = db.get(Party, d.customer_id)
+    material = db.get(Material, d.material_id)
+    _, d.cost_rate, d.cost_amount = stock.issue(
+        db, date=d.date, material_id=d.material_id, qty=d.stock_qty, source_type="delivery", source_id=d.id,
+        allow_negative=allow_negative,
+    )  # fmt: skip
+    narration = f"Challan {d.challan_no}: {d.qty} {d.unit} {material.name}"
+    if d.extra_material_id and d.extra_qty:
+        extra = db.get(Material, d.extra_material_id)
         _, _, d.extra_cost_amount = stock.issue(
-            db, date=data.date, material_id=extra.id, qty=data.extra_qty, source_type="delivery", source_id=d.id,
-            allow_negative=data.allow_negative_stock,
+            db, date=d.date, material_id=d.extra_material_id, qty=d.extra_qty, source_type="delivery",
+            source_id=d.id, allow_negative=allow_negative,
         )  # fmt: skip
-        narration += f" + {data.extra_qty} {extra.unit} {extra.name}"
+        narration += f" + {d.extra_qty} {extra.unit} {extra.name}"
+    driver = db.get(Staff, d.driver_id) if d.driver_id else None
     entry = post(
         db,
-        date=data.date,
+        date=d.date,
         source_type="delivery",
         source_id=d.id,
         narration=f"{narration} to {customer.name}",
         lines=rules.delivery(
             Chart(db), customer.account_id, sale=d.sale_amount + d.extra_amount, freight=d.freight_amount,
             cost=d.cost_amount + d.extra_cost_amount, vehicle_id=d.vehicle_id,
-        ) + rules.trip_pay(Chart(db), driver_account, d.trip_pay, d.vehicle_id),
+        ) + rules.trip_pay(Chart(db), driver.account_id if driver else None, d.trip_pay, d.vehicle_id),
     )  # fmt: skip
     d.journal_id = entry.id
 
 
 def _undo(db: Session, d: Delivery) -> None:
+    if d.journal_id is None:  # still an order: nothing was posted
+        return
     reverse(db, d.journal_id, reason=f"{d.challan_no} changed")
     stock.reverse_source(db, "delivery", d.id, allow_negative=True)
+    d.journal_id = None
+
+
+def _mark_delivered(db: Session, d: Delivery) -> None:
+    actor = db.info.get("actor")
+    d.delivered = True
+    d.delivered_at = dt.datetime.now(dt.UTC)
+    d.delivered_by = getattr(actor, "user_id", None)
 
 
 def create(db: Session, data: DeliveryIn) -> tuple[Delivery, bool]:
@@ -146,12 +167,16 @@ def create(db: Session, data: DeliveryIn) -> tuple[Delivery, bool]:
     d = Delivery(
         challan_no=next_doc_no(db, "challan", data.date), client_ref=data.client_ref,
         sale_rate=0, sale_amount=0, qty=data.qty, stock_qty=data.qty, unit=material.unit, customer_id=customer.id,
-        material_id=material.id, date=data.date,
+        material_id=material.id, date=data.date, delivered=False,
     )  # fmt: skip
     db.add(d)
     db.flush()
     _apply(db, d, data, customer, material, extra)
+    if data.delivered:
+        _mark_delivered(db, d)
+        _post(db, d, data.allow_negative_stock)
     if data.payment:
+        # Money handed over with the order is real cash in hand, so it is received now even if not yet delivered.
         receipt, _ = payments.create(
             db,
             PaymentIn(
@@ -163,9 +188,16 @@ def create(db: Session, data: DeliveryIn) -> tuple[Delivery, bool]:
     return d, True
 
 
-def update(db: Session, delivery_id: int, data: DeliveryIn) -> Delivery:
+def update(db: Session, delivery_id: int, data: DeliveryIn, *, can_edit_delivered: bool) -> Delivery:
     d = get_or_404(db, Delivery, delivery_id, "Challan")
     ensure_active(d)
+    if d.delivered and not can_edit_delivered:
+        raise Forbidden(
+            "This challan is already delivered, so it can no longer be changed. Ask the owner to correct it.",
+            code="CHALLAN_DELIVERED",
+        )
+    if d.delivered and not data.delivered:
+        raise Conflict("A delivered challan cannot go back to pending.", code="DELIVERED_IS_FINAL")
     # Before any other check, so a missing reason is the first thing the munshi is told.
     mark_edited(db, d, data.edit_reason)
     _ensure_not_invoiced(d)
@@ -173,6 +205,22 @@ def update(db: Session, delivery_id: int, data: DeliveryIn) -> Delivery:
     ensure_period_open(db, d.date, data.date)
     _undo(db, d)
     _apply(db, d, data, customer, material, extra)
+    if data.delivered:
+        if not d.delivered:
+            _mark_delivered(db, d)
+        _post(db, d, data.allow_negative_stock)
+    return d
+
+
+def deliver(db: Session, delivery_id: int, allow_negative: bool) -> Delivery:
+    """Mark an order delivered: from now on it is in the khata, trip pay and stock, and cannot go back."""
+    d = get_or_404(db, Delivery, delivery_id, "Challan")
+    ensure_active(d)
+    if d.delivered:
+        raise Conflict(f"Challan {d.challan_no} is already delivered.", code="ALREADY_DELIVERED")
+    ensure_period_open(db, d.date)
+    _mark_delivered(db, d)
+    _post(db, d, allow_negative)
     return d
 
 
@@ -195,6 +243,7 @@ def list_deliveries(
     material_id: int | None,
     status: str | None,
     invoiced: bool | None,
+    delivered: bool | None = None,
 ):
     stmt = select(Delivery)
     if params.date_from:
@@ -209,6 +258,8 @@ def list_deliveries(
     ):
         if value:
             stmt = stmt.where(column == value)
+    if delivered is not None:
+        stmt = stmt.where(Delivery.delivered.is_(delivered))
     if invoiced is not None:
         stmt = stmt.where(Delivery.invoice_id.is_not(None) if invoiced else Delivery.invoice_id.is_(None))
     if params.q:

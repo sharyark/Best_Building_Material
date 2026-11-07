@@ -32,6 +32,8 @@ def _fetch_docs(db: Session, model, ids: list[int], data: InvoiceIn, label: str)
             raise Conflict(f"{no} is void", code="DOCUMENT_VOID")
         if doc.invoice_id is not None:
             raise Conflict(f"{no} is already on an invoice", code="ON_INVOICE")
+        if getattr(doc, "delivered", True) is False:
+            raise Conflict(f"{no} is not delivered yet, so it cannot be billed", code="NOT_DELIVERED")
         if data.site_id and doc.site_id != data.site_id:
             raise Conflict(f"{no} is for a different site", code="WRONG_SITE")
     return list(docs)
@@ -144,7 +146,10 @@ def detail(db: Session, invoice: Invoice) -> InvoiceDetailOut:
 
 def uninvoiced(db: Session, customer_id: int, date_from: dt.date | None, date_to: dt.date | None, site_id: int | None):
     d_stmt = select(Delivery).where(
-        Delivery.customer_id == customer_id, Delivery.status == "active", Delivery.invoice_id.is_(None)
+        Delivery.customer_id == customer_id,
+        Delivery.status == "active",
+        Delivery.delivered.is_(True),
+        Delivery.invoice_id.is_(None),
     )
     r_stmt = select(Rental).where(
         Rental.customer_id == customer_id, Rental.status == "active", Rental.invoice_id.is_(None)

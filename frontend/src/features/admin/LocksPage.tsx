@@ -38,7 +38,7 @@ export default function LocksPage() {
         try {
           await api.delete(`/accounting/locks/${m}`)
           message.success('Month unlocked')
-          await qc.invalidateQueries()
+          void qc.invalidateQueries()
         } catch (e) {
           message.error(apiError(e).message)
         }

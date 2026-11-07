@@ -16,7 +16,7 @@ from app.core.money import qty as q3
 from app.modules.common import ensure_active, find_by_client_ref, get_or_404, mark_void
 from app.modules.deliveries.models import Delivery
 from app.modules.labour.models import Attendance, WageSettlement
-from app.modules.labour.schemas import AttendanceIn, SettlementIn, SettlementPreview
+from app.modules.labour.schemas import AttendanceIn, SettlementIn, SettlementPreview, StaffDues
 from app.modules.masters.models import Site, Staff, Vehicle
 from app.modules.payments.models import Payment
 from app.modules.purchases.models import Purchase
@@ -101,6 +101,32 @@ def _salary_side_before(db: Session, staff: Staff, period_to: dt.date) -> Decima
     return money(balance + trip_owed)
 
 
+def _gap_before(
+    db: Session, staff_id: int, period_from: dt.date
+) -> tuple[dt.date | None, dt.date | None, dt.date | None]:
+    """(last settled day before this period, first and last unsettled day in between). A settlement covers its
+    dates up to and including `period_to`, so the next one should start the day after."""
+    last = db.scalar(
+        select(func.max(WageSettlement.period_to)).where(
+            WageSettlement.staff_id == staff_id,
+            WageSettlement.status == "active",
+            WageSettlement.period_to < period_from,
+        )
+    )
+    if last is None or period_from <= last + dt.timedelta(days=1):
+        return last, None, None
+    return last, last + dt.timedelta(days=1), period_from - dt.timedelta(days=1)
+
+
+def dues(db: Session, staff_id: int, on: dt.date) -> StaffDues:
+    from app.modules.reports.queries import trip_money  # reports imports labour models; keep this lazy
+
+    staff = get_or_404(db, Staff, staff_id, "Staff")
+    total = money(-balance_of(db, staff.account_id, upto=on))
+    trip = money(trip_money(db, staff, on, on)["balance"])
+    return StaffDues(staff_id=staff.id, trip_owed=trip, salary_owed=total - trip, total_owed=total)
+
+
 def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date) -> SettlementPreview:
     staff = get_or_404(db, Staff, staff_id, "Staff")
     rows = db.scalars(
@@ -112,7 +138,7 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
     absent_days = q3(sum((1 - DAY_FACTOR[a.status] for a in rows), ZERO))
     # A document can be several trips (2 trolleys = 2 trips), saved on it as `trips`.
     trip_docs = [
-        (Delivery, Delivery.trips, [Delivery.driver_id == staff_id]),
+        (Delivery, Delivery.trips, [Delivery.driver_id == staff_id, Delivery.delivered.is_(True)]),
         (Purchase, Purchase.trips, [Purchase.driver_id == staff_id, Purchase.transport_by == "own"]),
         (Rental, Rental.trips, [Rental.operator_id == staff_id]),
     ]
@@ -147,7 +173,11 @@ def preview(db: Session, staff_id: int, period_from: dt.date, period_to: dt.date
         )
     )
     carried = _salary_side_before(db, staff, period_to)
+    last_settled_to, gap_from, gap_to = _gap_before(db, staff_id, period_from)
     return SettlementPreview(
+        last_settled_to=last_settled_to,
+        gap_from=gap_from,
+        gap_to=gap_to,
         staff_id=staff_id,
         period_from=period_from,
         period_to=period_to,
@@ -194,6 +224,15 @@ def create_settlement(db: Session, data: SettlementIn) -> tuple[WageSettlement, 
             "new settlement: enter it in Payments. To redo this one, the owner voids it first.",
             code="PERIOD_OVERLAP",
             details={"settlement_id": overlap.id},
+        )
+    last, gap_from, gap_to = _gap_before(db, data.staff_id, data.period_from)
+    if gap_from and gap_to and not data.allow_gap:
+        raise Conflict(
+            f"{staff.name} was last settled up to {last:%d-%m-%Y}, so {gap_from:%d-%m-%Y} to {gap_to:%d-%m-%Y} would "
+            f"be left out and those days' pay never counted. Start this settlement on {gap_from:%d-%m-%Y}, "
+            "or confirm that the gap is meant (e.g. the worker was away).",
+            code="PERIOD_GAP",
+            details={"gap_from": gap_from.isoformat(), "gap_to": gap_to.isoformat()},
         )
     ensure_period_open(db, data.period_to)
     pv = preview(db, data.staff_id, data.period_from, data.period_to)

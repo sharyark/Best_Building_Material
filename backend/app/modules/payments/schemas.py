@@ -5,7 +5,7 @@ from typing import Literal, Self
 
 from pydantic import ConfigDict, model_validator
 
-from app.core.types import PositiveMoney
+from app.core.types import MoneyIn, PositiveMoney
 from app.modules.common_schemas import EditableIn, EditInfoOut, VoidIn  # noqa: F401
 
 
@@ -17,10 +17,12 @@ class PaymentIn(EditableIn):
     money_account_id: int
     mode: Literal["cash", "bank", "cheque", "online"]
     # Staff payments: 'advance' (loan against future wages), 'salary' (pay-out of earned wages) or
-    # 'trip' (pay-out of trip money, kept apart so the salary side of the khata is untouched).
-    purpose: Literal["general", "advance", "salary", "trip"] = "general"
+    # 'trip' (pay-out of trip money, kept apart so the salary side of the khata is untouched), or
+    # 'sal_trip' (both at once: `trip_amount` of it is trip money, the rest salary).
+    purpose: Literal["general", "advance", "salary", "trip", "sal_trip"] = "general"
     ref_no: str | None = None
     amount: PositiveMoney
+    trip_amount: MoneyIn | None = None
     notes: str | None = None
     client_ref: uuid.UUID | None = None
 
@@ -47,6 +49,7 @@ class PaymentOut(EditInfoOut):
     purpose: str
     ref_no: str | None
     amount: Decimal
+    trip_amount: Decimal
     journal_id: int | None
     status: str
     void_reason: str | None

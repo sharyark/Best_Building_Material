@@ -5,6 +5,7 @@ from fastapi import APIRouter, Depends, Query, Response
 
 from app.core.deps import DB, CurrentUser, require_perm
 from app.core.pagination import ListQuery, Page
+from app.core.permissions import has_permission
 from app.modules.common import get_or_404
 from app.modules.deliveries import schemas as s
 from app.modules.deliveries import service
@@ -23,10 +24,11 @@ def list_deliveries(
     material_id: int | None = None,
     status: str | None = None,
     invoiced: bool | None = None,
+    delivered: bool | None = None,
 ):
     rows, total = service.list_deliveries(
         db, params, customer_id=customer_id, vehicle_id=vehicle_id, material_id=material_id,
-        status=status, invoiced=invoiced,
+        status=status, invoiced=invoiced, delivered=delivered,
     )  # fmt: skip
     return Page(items=rows, total=total, page=params.page, size=params.size)
 
@@ -64,8 +66,18 @@ def create_delivery(data: s.DeliveryIn, db: DB, response: Response):
 
 
 @router.put("/{delivery_id}", response_model=s.DeliveryOut, dependencies=[Depends(require_perm("challan.update"))])
-def update_delivery(delivery_id: int, data: s.DeliveryIn, db: DB):
-    delivery = service.update(db, delivery_id, data)
+def update_delivery(delivery_id: int, data: s.DeliveryIn, db: DB, user: CurrentUser):
+    can_edit_delivered = has_permission(user.role, "challan.edit_delivered")
+    delivery = service.update(db, delivery_id, data, can_edit_delivered=can_edit_delivered)
+    db.commit()
+    return delivery
+
+
+@router.post(
+    "/{delivery_id}/deliver", response_model=s.DeliveryOut, dependencies=[Depends(require_perm("challan.update"))]
+)
+def deliver(delivery_id: int, data: s.DeliverIn, db: DB):
+    delivery = service.deliver(db, delivery_id, data.allow_negative_stock)
     db.commit()
     return delivery
 

@@ -20,7 +20,7 @@ const delivery: Delivery = {
   sale_rate: '3000.00', sale_amount: '15000.00', freight_amount: '0.00', cost_rate: '2000.0000', cost_amount: '10000.00',
   vehicle_id: null, driver_id: null, trips: 1, trip_pay: '0.00', invoice_id: null, journal_id: 1, status: 'active', void_reason: null, notes: null,
   load_unit: null, load_size: 'full', stock_qty: '5.000', extra_material_id: null, extra_qty: null, extra_unit: null,
-  extra_rate: null, extra_amount: '0.00', extra_cost_amount: '0.00', receipt_id: null,
+  extra_rate: null, extra_amount: '0.00', extra_cost_amount: '0.00', receipt_id: null, delivered: true, delivered_at: null,
 }
 
 function ok(config: InternalAxiosRequestConfig, data: unknown) {
@@ -238,11 +238,25 @@ describe('ChallanForm payment (new challan)', () => {
     expect((screen.getByLabelText('Date') as HTMLInputElement).value).toBe(dayjs().format('DD-MM-YYYY'))
   })
 
+  it('a new challan is an order: no advance warning, sent as not delivered', async () => {
+    khataBalance = '-5000.00'
+    setup([])
+    renderForm(vi.fn(), null)
+    await fillChallan()
+    expect(screen.getByRole('checkbox', { name: /Delivered/ })).not.toBeChecked()
+    expect(await screen.findByText(/khata changes when it is marked delivered/)).toBeInTheDocument()
+    expect(screen.queryByText(/runs out with this challan/)).not.toBeInTheDocument()
+    await userEvent.click(screen.getByRole('button', { name: /Save & next/ }))
+    await waitFor(() => expect(posts).toHaveLength(1))
+    expect(posts[0]).toMatchObject({ delivered: false })
+  }, 20_000)
+
   it('warns when the advance runs out and "Take more advance" receives the shortfall', async () => {
     khataBalance = '-5000.00'
     setup([])
     renderForm(vi.fn(), null)
     await fillChallan()
+    await userEvent.click(screen.getByRole('checkbox', { name: /Delivered/ }))  // only a delivered challan uses the advance
     // the khata tag under the customer shows the advance
     expect(await screen.findByText((_, el) => Boolean(el?.classList.contains('ant-tag') && /Advance: .*5,000/.test(el.textContent ?? '')))).toBeInTheDocument()
     expect(await screen.findByText(/runs out with this challan/)).toBeInTheDocument()
@@ -260,6 +274,7 @@ describe('ChallanForm payment (new challan)', () => {
     setup([])
     renderForm(vi.fn(), null)
     await fillChallan()
+    await userEvent.click(screen.getByRole('checkbox', { name: /Delivered/ }))
     await userEvent.click(await screen.findByRole('button', { name: 'Put it on udhaar' }))
     expect(screen.queryByText(/runs out with this challan/)).not.toBeInTheDocument()
     await userEvent.click(screen.getByRole('button', { name: /Save & next/ }))

@@ -49,6 +49,8 @@ export const deliverySchema = z.object({
   pay: z.enum(['credit', 'full', 'part']).default('credit'),
   paid_amount: optionalMoney,
   money_account_id: optionalId,
+  /** Unticked = an order: saved and printed, but the khata, trip pay and stock change only once delivered. */
+  delivered: z.boolean().default(false),
 }).superRefine((v, ctx) => {
   if (!v.material_id) {
     const group = (v.material_pick ?? 0) < 0
@@ -90,14 +92,20 @@ export const paymentSchema = z
     staff_id: optionalId,
     money_account_id: id,
     mode: z.enum(['cash', 'bank', 'cheque', 'online']),
-    purpose: z.enum(['general', 'advance', 'salary', 'trip']),
+    purpose: z.enum(['general', 'advance', 'salary', 'trip', 'sal_trip']),
     ref_no: z.string().max(60).optional().or(z.literal('')),
     amount: positiveMoney,
+    /** Salary + trip only: how much of the amount is trip money. */
+    trip_amount: optionalMoney,
     notes: z.string().max(500).optional().or(z.literal('')),
   })
   .superRefine((v, ctx) => {
     if (v.counterparty === 'party' && !v.party_id) ctx.addIssue({ code: 'custom', path: ['party_id'], message: 'Required' })
     if (v.counterparty === 'staff' && !v.staff_id) ctx.addIssue({ code: 'custom', path: ['staff_id'], message: 'Required' })
+    if (v.counterparty === 'staff' && v.purpose === 'sal_trip') {
+      if (v.trip_amount === '' || v.trip_amount == null) ctx.addIssue({ code: 'custom', path: ['trip_amount'], message: 'Enter the trip money part (0 if none)' })
+      else if (Number(v.trip_amount) > Number(v.amount)) ctx.addIssue({ code: 'custom', path: ['trip_amount'], message: 'Cannot be more than the total amount' })
+    }
   })
 export type PaymentForm = z.infer<typeof paymentSchema>
 

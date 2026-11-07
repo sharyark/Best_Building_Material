@@ -53,6 +53,10 @@ npm run dev                   # http://localhost:5173  (proxies /api to 127.0.0.
 **No Docker?** Use SQLite for a quick look: in `backend/.env` set `DATABASE_URL=sqlite:///./dev.db` and
 `AUTO_CREATE_TABLES=true`, then `python -m app.seed --reset`. (Production must use PostgreSQL.)
 
+**Same versions years later?** [`req.txt`](req.txt) pins every Python package to the exact version that was
+tested (`pip install -r req.txt && pip install -e backend --no-deps`) and records the tool versions (Python,
+Node, PostgreSQL, Docker). The frontend is locked by `frontend/package-lock.json`: use `npm ci`, not `npm install`.
+
 Demo logins (created by the seed): **admin / admin12345** (owner) and **munshi / munshi12345** (accountant).
 `python -m app.bootstrap` alone creates just the first admin from `BOOTSTRAP_ADMIN_*`: change that password.
 

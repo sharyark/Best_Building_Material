@@ -57,6 +57,20 @@ class SettlementPreview(BaseModel):
     # What is left to pay after this settlement, before any deduction: (gross if it posts now) - carried_forward.
     # Negative = nothing to pay; they still owe that much, and it comes off next month.
     net_before_deductions: Decimal
+    # Days between the last settlement and this period that no settlement covers (their pay would be missed).
+    last_settled_to: dt.date | None
+    gap_from: dt.date | None
+    gap_to: dt.date | None
+
+
+class StaffDues(BaseModel):
+    """What we owe a worker right now, split the way the payment purposes are (positive = we owe)."""
+
+    staff_id: int
+    trip_owed: Decimal
+    # Negative = the worker owes us (an advance not yet earned back).
+    salary_owed: Decimal
+    total_owed: Decimal
 
 
 class SettlementIn(BaseModel):
@@ -68,6 +82,8 @@ class SettlementIn(BaseModel):
     # No advances field: the settlement takes the advances actually entered in Payments for the period,
     # so the settlement and the khata can never disagree.
     notes: str | None = None
+    # Leaving unsettled days before this period needs an explicit yes (see PERIOD_GAP).
+    allow_gap: bool = False
     client_ref: uuid.UUID | None = None
 
 

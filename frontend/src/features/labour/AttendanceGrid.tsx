@@ -90,7 +90,7 @@ export default function AttendanceGrid() {
       await api.put('/labour/attendance', { entries })
       message.success(`Saved ${entries.length} attendance mark(s)`)
       setEdits({})
-      await qc.invalidateQueries()
+      void qc.invalidateQueries()
     } catch (e) {
       message.error(apiError(e).message, 6)
     } finally {

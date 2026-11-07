@@ -32,8 +32,9 @@ export function useSave<TIn, TOut = unknown>(
   const { message } = App.useApp()
   return useMutation({
     mutationFn: async (v: TIn) => (await api[method]<TOut>(typeof url === 'function' ? url(v) : url, v)).data,
-    onSuccess: async (data, v) => {
-      await qc.invalidateQueries()
+    onSuccess: (data, v) => {
+      // Not awaited: the save is already done, so the button should not keep spinning while every screen refetches.
+      void qc.invalidateQueries()
       if (opts.successMessage) message.success(opts.successMessage)
       opts.onSuccess?.(data, v)
     },

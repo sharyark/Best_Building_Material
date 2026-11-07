@@ -258,6 +258,12 @@ def payment_pdf(db: Session, payment_id: int, paper: Paper = "a5") -> Response:
     account = db.get(MoneyAccount, p.money_account_id)
     title = "Receipt voucher" if p.direction == "in" else "Payment voucher"
     name = f"{p.voucher_no.replace('/', '_')}.pdf"
+    # Salary and trip money paid together: show both parts so the worker sees what each was for.
+    split = (
+        [("Salary", fmt_money(p.amount - p.trip_amount)), ("Trip money", fmt_money(p.trip_amount))]
+        if p.purpose == "sal_trip"
+        else []
+    )
     if paper != "a5":
         cur = get_settings().currency_symbol
         body = (
@@ -269,6 +275,7 @@ def payment_pdf(db: Session, payment_id: int, paper: Paper = "a5") -> Response:
                     ("Mode", p.mode),
                     ("Account", account.name),
                     ("Reference", p.ref_no or ""),
+                    *split,
                 ]
             )  # fmt: skip
             + f"</table><hr><table><tr class='total'><td>AMOUNT {cur}</td><td class='r'>{fmt_money(p.amount)}</td></tr></table>"
@@ -279,7 +286,7 @@ def payment_pdf(db: Session, payment_id: int, paper: Paper = "a5") -> Response:
         return _pdf(_thermal(paper, title, p.voucher_no, body, void_reason=void), name)
     body = _kv([
         ("Date", fmt_date(p.date)), ("Received from" if p.direction == "in" else "Paid to", who),
-        ("Amount", f"{fmt_money(p.amount)} {get_settings().currency_symbol}"), ("Mode", p.mode),
+        ("Amount", f"{fmt_money(p.amount)} {get_settings().currency_symbol}"), *split, ("Mode", p.mode),
         ("Account", account.name), ("Reference", p.ref_no or ""), ("Notes", p.notes or ""),
     ])  # fmt: skip
     return _pdf(_page(title, p.voucher_no, body), name)

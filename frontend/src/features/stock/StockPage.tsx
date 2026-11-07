@@ -54,7 +54,7 @@ function PhysicalCount() {
       const { data: c } = await api.post<StockCount>('/stock/counts', { date, material_id: item.material_id, physical_qty: physical[item.material_id] })
       message.success(Number(c.diff) === 0 ? 'Count matches the system' : `Adjusted by ${formatQty(c.diff)} ${item.unit} (posted to Stock Loss)`)
       setPhysical((p) => ({ ...p, [item.material_id]: '' }))
-      await qc.invalidateQueries()
+      void qc.invalidateQueries()
     } catch (e) {
       message.error(apiError(e).message)
     } finally {

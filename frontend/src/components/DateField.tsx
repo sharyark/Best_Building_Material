@@ -43,9 +43,10 @@ const presets = [
 
 export type DateRange = [string, string]
 
-export function DateRangeField({ value, onChange }: { value: DateRange; onChange: (v: DateRange) => void }) {
+export function DateRangeField({ value, onChange, disabled }: { value: DateRange; onChange: (v: DateRange) => void; disabled?: boolean }) {
   return (
     <DatePicker.RangePicker
+      disabled={disabled}
       format={UI_DATE}
       value={[dayjs(value[0]), dayjs(value[1])]}
       presets={presets}
