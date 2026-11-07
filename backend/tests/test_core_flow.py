@@ -293,9 +293,10 @@ def test_opening_balances_and_stock(world):
 
 def test_edit_needs_a_reason_and_is_marked_edited(world, accountant):
     purchase(world)
-    d = challan(world, "1")
+    d = challan(world, "1", delivered=False)  # the munshi can only edit an order that is not delivered yet
     assert d["edit_count"] == 0 and d["edit_reason"] is None
-    body = {"date": str(TODAY), "customer_id": world.customer["id"], "material_id": world.rait["id"], "qty": "2"}
+    body = {"date": str(TODAY), "customer_id": world.customer["id"], "material_id": world.rait["id"], "qty": "2",
+            "delivered": False}  # fmt: skip
 
     r = world.c.put(f"/api/v1/deliveries/{d['id']}", json=body, headers=accountant)
     assert r.status_code == 400 and r.json()["code"] == "EDIT_REASON_REQUIRED"

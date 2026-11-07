@@ -44,7 +44,8 @@ E2E gotcha: login is rate-limited to 5/min/IP (DB-backed), so a full run can tri
 **Hidden double-entry.** Users fill simple forms (challan, purchase, payment, diesel...). `backend/app/accounting/posting.py` is the *only* writer of journal entries/lines; each module service calls it in the same DB transaction as the document. Event → Dr/Cr mappings live in `accounting/rules.py`; the chart in `accounting/chart.py`. Never write journal rows anywhere else. Reports are queries over `journal_lines`; `accounting/balances.py` computes party/account balances.
 
 **Document lifecycle rules** (all enforced in the service layer, tested in `tests/test_invariants.py`):
-- No hard delete of financial documents: *void* (reason required) posts a reversal dated the same day; *edit* = reverse + re-post.
+- No hard delete of financial documents: *void* (reason required) posts a reversal dated the same day; *edit* = reverse + re-post, and also needs a reason: every service `update` calls `mark_edited` in `modules/common.py` (`EDIT_REASON_REQUIRED` under 3 chars; the forms use `components/EditReasonField`).
+- A challan (`deliveries`) is an *order* until marked delivered (`delivered` flag, one way, `POST /deliveries/{id}/deliver` or the form checkbox): only then does it post the khata/trip-pay journal and move stock. Pending orders have no `journal_id`, are excluded from sales/trip/stock reports and invoices, and can be edited by the munshi; a delivered one only with `challan.edit_delivered` (owner). Money paid with an order is received at once.
 - Month lock (`period_locks`) blocks add/edit/void for any date in a locked month.
 - Gap-free numbering via `doc_sequences` (financial-year based, `FIN_YEAR_START_MONTH`).
 - `client_ref` makes POSTs idempotent.
@@ -83,7 +84,7 @@ E2E gotcha: login is rate-limited to 5/min/IP (DB-backed), so a full run can tri
 | Permission/debounce hooks | `frontend/src/hooks/` |
 | UI strings scaffolding | `frontend/src/i18n/` |
 | Browser tests | `frontend/e2e/`; unit tests sit beside the file (`*.test.ts(x)`) |
-| Running it (local and at the client), CI | `docker-compose.dev.yml`, `dev*.sh` / `dev*.bat` / `dev.ps1`, `INSTALL.md`, `.github/workflows/ci.yml` |
+| Running it (local and at the client), backups, CI | `docker-compose.dev.yml`, `dev*.sh` / `dev*.bat` / `dev.ps1`, `backup.*` / `restore.*`, `INSTALL.md`, `.github/workflows/ci.yml` |
 
 Layering rule (backend): router → service → posting engine/models. Routers only validate, authorise and call services; services hold business rules and call `posting.py`; nothing but `posting.py` creates journal rows.
 

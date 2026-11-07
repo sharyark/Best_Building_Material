@@ -1,7 +1,7 @@
 import datetime as dt
 from decimal import Decimal
 
-from sqlalchemy import Date, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, Date, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, BigIntFK, BigIntPK, Money, Qty, Rate, TimestampMixin
@@ -49,6 +49,11 @@ class Delivery(Base, TimestampMixin, TxnMixin):
     receipt_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("payments.id"), nullable=True)
     journal_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("journal_entries.id"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # A challan starts as an order. Only when the munshi marks it delivered (one way, never back) does it reach the
+    # customer's khata, the driver's trip pay and yard stock; until then `journal_id` is empty and no stock moves.
+    delivered: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    delivered_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    delivered_by: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("users.id"), nullable=True)
 
     __table_args__ = (
         Index("ix_deliveries_customer_date", "customer_id", "date"),

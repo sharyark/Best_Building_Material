@@ -19,9 +19,11 @@ class Payment(Base, TimestampMixin, TxnMixin):
     staff_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("staff.id"), nullable=True)
     money_account_id: Mapped[int] = mapped_column(BigIntFK, ForeignKey("money_accounts.id"))
     mode: Mapped[str] = mapped_column(String(10))  # cash | bank | cheque | online
-    purpose: Mapped[str] = mapped_column(String(10), default="general")  # general | advance | salary | trip
+    purpose: Mapped[str] = mapped_column(String(10), default="general")  # general | advance | salary | trip | sal_trip
     ref_no: Mapped[str | None] = mapped_column(String(60), nullable=True)
     amount: Mapped[Decimal] = mapped_column(Money)
+    # Only for 'sal_trip' (salary and trip money paid together): the trip money part; the rest is salary.
+    trip_amount: Mapped[Decimal] = mapped_column(Money, default=0, server_default="0")
     journal_id: Mapped[int | None] = mapped_column(BigIntFK, ForeignKey("journal_entries.id"), nullable=True)
     notes: Mapped[str | None] = mapped_column(Text, nullable=True)
 

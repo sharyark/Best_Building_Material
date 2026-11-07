@@ -137,7 +137,7 @@ test.describe('admin', () => {
     await expect(page.getByLabel('Rate', { exact: true })).not.toHaveValue('', { timeout: 10_000 })
     await expect(page.getByText(/Yard stock: .* of Rait/)).toBeVisible()
     await page.getByLabel('Qty', { exact: true }).press('Enter')
-    await expect(page.getByText(/Challan CH\/.* saved/)).toBeVisible()
+    await expect(page.getByText(/(Challan|Order) CH\/.* saved/)).toBeVisible()
     await expect(page.getByLabel('Qty', { exact: true })).toHaveValue('')
     await expect(page.getByLabel('Rate', { exact: true })).toHaveValue('')
     expect(errors).toEqual([])

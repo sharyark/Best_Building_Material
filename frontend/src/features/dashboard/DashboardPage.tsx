@@ -109,6 +109,13 @@ export default function DashboardPage() {
   const khata = (id: number) => (canKhata ? { to: `/reports/khata?party=${id}`, label: 'Open khata' } : undefined)
 
   const todos: Todo[] = [
+    ...(d.pending_orders > 0
+      ? [{
+          key: 'orders', tone: 'warn' as const, icon: <CarOutlined />,
+          text: <><strong>{d.pending_orders}</strong> challan{d.pending_orders === 1 ? ' is' : 's are'} not marked delivered yet, so not in the khata.</>,
+          action: { to: '/challans?pending=1', label: 'Pending orders' },
+        }]
+      : []),
     ...d.old_udhaar.slice(0, 4).map((u) => ({
       key: `u${u.party_id}`, tone: u.days > 30 ? 'bad' as const : 'warn' as const, icon: <ClockCircleOutlined />,
       text: <><strong>{u.name}</strong> owes {rs(u.balance)}, unpaid for <strong>{u.days} days</strong></>, action: khata(u.party_id),

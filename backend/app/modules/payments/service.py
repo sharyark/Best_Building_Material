@@ -4,7 +4,8 @@ from sqlalchemy.orm import Session
 from app.accounting import rules
 from app.accounting.posting import ensure_period_open, post, reverse
 from app.accounting.sequences import next_doc_no
-from app.core.errors import Conflict, NotFound
+from app.core.errors import Conflict, DomainError, NotFound
+from app.core.money import money
 from app.core.pagination import ListParams, apply_sort, paginate
 from app.modules.common import ensure_active, find_by_client_ref, get_or_404, mark_edited, mark_void
 from app.modules.masters.models import MoneyAccount, Party, Staff
@@ -13,6 +14,18 @@ from app.modules.payments.schemas import PaymentIn
 
 # Shown in the staff khata so a trip payout is not mistaken for salary.
 PURPOSE_LABEL = {"advance": "advance", "salary": "salary", "trip": "trip money"}
+
+
+def _trip_part(data: PaymentIn):
+    """Trip money inside a 'salary + trip' payment; zero for every other purpose."""
+    if data.purpose != "sal_trip":
+        return money(0)
+    # Either part may be zero, so the munshi can always pick "salary + trip" to pay whatever is owed.
+    if data.trip_amount is None:
+        raise DomainError("Enter how much of this is trip money (0 if none).", code="TRIP_PART_REQUIRED")
+    if data.trip_amount > data.amount:
+        raise DomainError("The trip money part cannot be more than the total amount.", code="TRIP_PART_TOO_BIG")
+    return money(data.trip_amount)
 
 
 def _counterparty(db: Session, data: PaymentIn) -> tuple[int, str]:
@@ -42,11 +55,14 @@ def _apply(db: Session, p: Payment, data: PaymentIn) -> None:
     p.purpose = data.purpose
     p.ref_no = data.ref_no
     p.amount = data.amount
+    p.trip_amount = _trip_part(data)
     p.notes = data.notes
     db.flush()
     rule = rules.payment_in if data.direction == "in" else rules.payment_out
     label = "received from" if data.direction == "in" else "paid to"
     what = PURPOSE_LABEL.get(data.purpose)
+    if data.purpose == "sal_trip":
+        what = f"salary {data.amount - p.trip_amount:,.2f} + trip money {p.trip_amount:,.2f}"
     entry = post(
         db,
         date=data.date,

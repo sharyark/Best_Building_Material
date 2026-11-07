@@ -20,20 +20,25 @@ import { formatQty } from '@/lib/format'
 import { openFile } from '@/lib/download'
 import { getPaper } from '@/lib/paper'
 import ChallanForm from './ChallanForm'
+import { DeliverButton } from './DeliverButton'
 import { STICKY_HEADER } from '@/components/tableDefaults'
 
 export default function ChallanPage() {
   const lookups = useLookups()
   const canEdit = usePermission('challan.update')
+  // The munshi can change an order until it is delivered; after that only the owner can.
+  const canEditDelivered = usePermission('challan.edit_delivered')
   const [search] = useSearchParams()
   // ?date= from the dashboard opens that day's challans
   const [range, setRange] = useState<DateRange>(() => rangeFromUrl(search) ?? [startOfMonth(), today()])
   const [customerId, setCustomerId] = useState<number | null>(null)
   const [status, setStatus] = useState<string | undefined>()
+  const [delivered, setDelivered] = useState<boolean | undefined>(() => (search.get('pending') ? false : undefined))
   const [page, setPage] = useState(1)
   const [editing, setEditing] = useState<Delivery | null>(null)
   const { data, isLoading } = usePage<Delivery>('/deliveries', {
-    from: range[0], to: range[1], customer_id: customerId, status, page, size: 25,
+    // Pending orders are listed whatever their date, so an old one is not forgotten.
+    ...(delivered === false ? {} : { from: range[0], to: range[1] }), customer_id: customerId, status, delivered, page, size: 25,
   })
 
   const wide = Grid.useBreakpoint().md ?? false
@@ -58,6 +63,11 @@ export default function ChallanPage() {
     { title: 'Rate', dataIndex: 'sale_rate', align: 'right', render: (v) => <Money value={v} /> },
     { title: 'Amount', align: 'right', render: (_, d) => <Money value={Number(d.sale_amount) + Number(d.freight_amount) + Number(d.extra_amount)} bold /> },
     { title: 'Vehicle', dataIndex: 'vehicle_id', render: (id: number | null) => (id ? lookups.vehicleById.get(id)?.name : '') },
+    {
+      title: 'Delivery',
+      render: (_, d) =>
+        d.status !== 'active' ? null : d.delivered ? <Tag color="green">Delivered</Tag> : <Tag color="orange">Pending</Tag>,
+    },
     { title: 'Status', render: (_, d) => <StatusTag status={d.status} reason={d.void_reason} edit={d} /> },
     {
       title: '',
@@ -67,8 +77,9 @@ export default function ChallanPage() {
       fixed: wide ? 'right' : undefined,
       render: (_, d) => (
         <Space size={4}>
+          {canEdit && d.status === 'active' && !d.delivered && <DeliverButton delivery={d} />}
           <PrintButton url={`/deliveries/${d.id}/pdf`} thermal />
-          {canEdit && d.status === 'active' && (
+          {canEdit && d.status === 'active' && (!d.delivered || canEditDelivered) && (
             <Button size="small" icon={<EditOutlined />} disabled={Boolean(d.invoice_id)} title={d.invoice_id ? 'On an invoice: void the invoice first' : 'Edit'} onClick={() => setEditing(d)} />
           )}
           {d.status === 'active' && (
@@ -87,8 +98,9 @@ export default function ChallanPage() {
       </Card>
       <ExportCard endpoint="/deliveries" noun="challan" />
       <Space wrap style={{ marginBottom: 12 }}>
-        <DateRangeField value={range} onChange={(r) => { setRange(r); setPage(1) }} />
+        <DateRangeField disabled={delivered === false} value={range} onChange={(r) => { setRange(r); setPage(1) }} />
         <div style={{ width: 220 }}><EntitySelect options={optionsOf(lookups.customers)} value={customerId} onChange={(v) => { setCustomerId(v); setPage(1) }} placeholder="All customers" /></div>
+        <Select allowClear placeholder="Pending or delivered" style={{ width: 180 }} value={delivered} onChange={(v) => { setDelivered(v); setPage(1) }} options={[{ value: false, label: 'Pending orders' }, { value: true, label: 'Delivered' }]} />
         <Select allowClear placeholder="Any status" style={{ width: 130 }} value={status} onChange={(v) => { setStatus(v); setPage(1) }} options={[{ value: 'active', label: 'Active' }, { value: 'void', label: 'Void' }]} />
       </Space>
       <Table<Delivery>

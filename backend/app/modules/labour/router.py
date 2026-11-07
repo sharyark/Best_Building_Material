@@ -25,6 +25,12 @@ def save_attendance(data: s.AttendanceBulkIn, db: DB):
     return rows
 
 
+@router.get("/dues/{staff_id}", response_model=s.StaffDues, dependencies=[READ])
+def staff_dues(staff_id: int, db: DB, on: dt.date | None = None):
+    """Salary and trip money owed to a worker, to fill a 'salary + trip' payment."""
+    return service.dues(db, staff_id, on or dt.date.today())
+
+
 @router.get("/settlements/preview", response_model=s.SettlementPreview, dependencies=[READ])
 def preview_settlement(db: DB, staff_id: int, period_from: dt.date, period_to: dt.date):
     return service.preview(db, staff_id, period_from, period_to)

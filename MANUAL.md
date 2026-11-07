@@ -93,7 +93,8 @@ Ye sirf **ek dafa** hota hai. Galti ho to dobara daal dein; naya amount purane k
 
 | Kaam | Screen | Kya hota hai |
 |---|---|---|
-| Maal bika | **Challans** | Customer ka khata barhta hai, yard ka maal ghatta hai, driver ke trip jurte hain |
+| Order aaya | **Challans** (Delivered ka nishan **khaali**) | Challan ban kar print ho jata hai, lekin abhi khata, stock aur driver ke trip mein **kuch nahi** jata |
+| Maal pohanch gaya | **Challans** > list mein **Mark delivered** (ya challan banate waqt hi **Delivered** tick) | Ab customer ka khata barhta hai, yard ka maal ghatta hai, driver ke trip jurte hain |
 | Maal aaya | **Purchases** | Supplier ka hisaab barhta hai, yard ka maal barhta hai |
 | Paise mile | **Payments > New receipt (money in)** | Customer ka khata ghatta hai, cash barhta hai |
 | Paise diye | **Payments > New payment (money out)** | Supplier/staff ka hisaab ghatta hai, cash ghatta hai |
@@ -203,11 +204,14 @@ Trip ke paise de dene se tankhwah wala hissa nahi badalta. Woh 10,000 hi rehta h
 |---|---|
 | Advance | Mahine ke beech udhaar (tankhwah se katega) |
 | Trip money | Hafte ke trip ke paise |
+| Salary + trip money (both) | Tankhwah aur trip ke paise ek saath. Staff chunte hi app dono baqaye bhar deti hai: kul rakam aur us mein se trip ka hissa. Report mein dono taraf "paid" dikhta hai |
 | Salary / wage payout | Tankhwah ya mazdoori ki adaigi |
 
 **Mahine ke aakhir:** **Labour & wages > Wage settlement** se driver ka mahina settle karein. Tab 15,000 tankhwah khata mein judti hai, aur baqi 10,000 de dein (purpose: Salary).
 
 **Advance hamesha Payments mein darj karein** (Purpose: Advance). Settlement khud wahi advance uthata hai; wahan advance likhne ka khana nahi. Settlement ke baad diya gaya advance naye settlement ke baghair seedha khata mein kat-ta hai. Ek din ka settlement do baar nahi banta; galti ho to Owner purana settlement void karke dobara banaye.
+
+**Settlement ki tareekh:** settlement jis tareekh tak hui, us din tak ka hisaab band. Worker chunte hi tareekh khud **pichli settlement ke agle din** se bhar jati hai (misaal: pichli 31-10 tak thi, to nayi 01-11 se). Agar beech ke din chhoot rahe hon to peeli warning aati hai, kyun ke un dinon ki kamai kabhi nahi ginni jayegi; "Start from ..." dabayein. Sirf tab chhodein jab worker un dinon kaam par na tha.
 
 **Tankhwah se katoti (chutti, jurmana...):** settle karte waqt "Katoti" ki rakam ke saath **wajah** chunni zaroori hai: Chutti (absent din), Jurmana, Nuqsan ya Other, aur detail (misaal "2 din"). "Chutti" chunne par mahana staff ki katoti khud ban jati hai: absent din × (tankhwah ÷ 30). Wajah staff khata mein likhi aati hai: "katoti 1,000.00: Chutti: 2 din".
 
@@ -238,6 +242,8 @@ Maal ki bikri gaadi ki kamai nahi ginti. Gaadi ki kamai sirf bhara aur kiraya ha
 
 ## 8. Galti ho jaye to
 
+- **Delivered challan:** ek dafa Delivered ho gaya to wapas "Pending" nahi ho sakta, aur munshi use edit nahi kar sakta. Ghalti ho to Owner wajah likh kar edit karta hai.
+- **Pending order:** jab tak delivered nahi hua, munshi wajah likh kar edit kar sakta hai; order cancel ho to Owner void kar de (khata par koi asar nahi).
 - **Edit:** entry kholein, theek karein, aur **wajah** likhein. Purana hisaab khud ulta hota hai aur naya lagta hai; dono record mein rehte hain.
 - **Void (cancel):** sirf Owner kar sakta hai, aur wajah likhna zaroori hai. Entry mitti nahi, "void" ho jati hai, aur us ka hisaab wapas ho jata hai.
 - **Delete ka button nahi hai.** Paison ka record kabhi gayab nahi hota.
@@ -249,5 +255,5 @@ Maal ki bikri gaadi ki kamai nahi ginti. Gaadi ki kamai sirf bhara aur kiraya ha
 
 1. **Pehle Masters, phir Opening balance, phir roz ki entries.**
 2. Har cheez ki **ek hi entry** karein. Baqi sab app khud karti hai.
-3. Trip ke paise dete waqt purpose **"Trip money"** chunein, warna woh tankhwah se kat jayenge.
+3. Trip ke paise dete waqt purpose **"Trip money"** chunein, warna woh tankhwah se kat jayenge. Dono ek saath dene hon to **"Salary + trip money (both)"**.
 4. Har shaam **Dashboard** dekh lein: galle ka cash, aaj ke trip, aur kis se paise lene hain.

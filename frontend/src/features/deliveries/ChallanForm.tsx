@@ -1,5 +1,5 @@
 import { zodResolver } from '@hookform/resolvers/zod'
-import { Alert, App, Button, Col, Form, Input, Row, Segmented, Select, Space, Tag, Typography } from 'antd'
+import { Alert, App, Button, Checkbox, Col, Form, Input, Row, Segmented, Select, Space, Tag, Typography } from 'antd'
 import type { RefSelectProps } from 'antd/es/select'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useForm, useWatch } from 'react-hook-form'
@@ -67,6 +67,7 @@ const blank = (last: Last): DeliveryForm => ({
   pay: 'credit',
   paid_amount: '',
   money_account_id: null,
+  delivered: false,
 })
 
 /** Half of `qty` loads, kept to the 3 decimals quantities allow. */
@@ -153,7 +154,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
           other_half_id: delivery.load_size === 'half' && delivery.extra_unit === 'trolley' ? delivery.extra_material_id : null,
           extra_qty: delivery.extra_qty ? String(toNumber(delivery.extra_qty)) : '',
           extra_rate: delivery.extra_rate ? String(delivery.extra_rate) : '',
-          pay: 'credit', paid_amount: '', money_account_id: null,
+          pay: 'credit', paid_amount: '', money_account_id: null, delivered: delivery.delivered,
         }
       // A new challan opens on today's date (vehicle and driver are remembered); after "Save & next" the date just
       // used is kept, so a batch of back-dated challans needs the date picked only once.
@@ -163,7 +164,8 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
     control,
     name: ['date', 'customer_id', 'material_id', 'qty', 'sale_rate', 'freight_amount', 'load_size', 'with_cement', 'other_half_id', 'extra_qty', 'extra_rate', 'pay', 'paid_amount', 'money_account_id'],
   })
-  const [materialPick, cementTypeId] = useWatch({ control, name: ['material_pick', 'cement_type_id'] })
+  const [materialPick, cementTypeId, delivered] = useWatch({ control, name: ['material_pick', 'cement_type_id', 'delivered'] })
+  const alreadyDelivered = Boolean(delivery?.delivered)
   const balanceQuery = useGet<PartyBalance>(`/masters/parties/${customerId}/balance`, undefined, { enabled: Boolean(customerId), staleTime: 5_000 })
   // keepPreviousData would briefly show the last customer's khata; only trust a matching answer
   const khata = balanceQuery.data?.party_id === customerId ? balanceQuery.data : undefined
@@ -315,9 +317,11 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
   // Khata after this challan (when editing, the balance already includes it).
   const khataBalance = toNumber(khata?.balance)
   const advance = khataBalance < 0 ? -khataBalance : 0
-  const after = round2(khataBalance + (editing ? 0 : total) - paidNow)
-  const advanceRunsOut = !editing && advance > 0 && total > 0 && after > 0
-  const advanceLow = !editing && advance > 0 && total > 0 && after <= 0 && -after < toNumber(khata?.advance_low_threshold)
+  // An order is not charged yet, so only money paid with it moves the khata.
+  const charged = !editing && delivered ? total : 0
+  const after = round2(khataBalance + charged - paidNow)
+  const advanceRunsOut = charged > 0 && advance > 0 && after > 0
+  const advanceLow = charged > 0 && advance > 0 && after <= 0 && -after < toNumber(khata?.advance_low_threshold)
 
   async function submit(values: DeliveryForm, allowNegative = false) {
     setTriedSave(true)
@@ -353,8 +357,9 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
       const { data } = editing
         ? await api.put<Delivery>(`/deliveries/${delivery!.id}`, body)
         : await api.post<Delivery>('/deliveries', body)
-      await qc.invalidateQueries()
-      message.success(data.receipt_id ? `Challan ${data.challan_no} saved, ${formatCurrency(paid)} received` : `Challan ${data.challan_no} saved`)
+      void qc.invalidateQueries()
+      const what = data.delivered ? `Challan ${data.challan_no} saved` : `Order ${data.challan_no} saved (goes to khata when delivered)`
+      message.success(data.receipt_id ? `${what}, ${formatCurrency(paid)} received` : what)
       if (!editing) {
         const last: Last = { date: values.date, vehicle_type: vehicleType, vehicle_id: values.vehicle_id, driver_id: values.driver_id }
         localStorage.setItem(LAST_KEY, JSON.stringify(last))
@@ -665,7 +670,7 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
           {customerId && khata && total > 0 && (
             <Col xs={24} lg={pay === 'credit' ? 16 : pay === 'part' ? 6 : 11}>
               <Typography.Text type="secondary" className="challan-extra-hint">
-                {after > 0 ? <>Udhaar after this: <Money value={after} /></> : after < 0 ? <>Advance left after this: <Money value={-after} /></> : 'Khata will be clear'}
+                {!delivered && !paidNow ? 'Order: the khata changes when it is marked delivered' : after > 0 ? <>Udhaar after this: <Money value={after} /></> : after < 0 ? <>Advance left after this: <Money value={-after} /></> : 'Khata will be clear'}
               </Typography.Text>
             </Col>
           )}
@@ -709,6 +714,19 @@ export default function ChallanForm({ delivery, onSaved, onPrint }: Props) {
         </Col>
         <Col xs={24} lg={12}>
           <Space align="center" style={{ width: '100%', justifyContent: 'flex-end', marginBottom: 12 }} wrap>
+            <Field control={control} name="delivered" label="Delivery">
+              {(f) => (
+                <Checkbox
+                  id={f.id}
+                  checked={f.value}
+                  disabled={alreadyDelivered}
+                  onChange={(e) => f.onChange(e.target.checked)}
+                  title={alreadyDelivered ? 'Delivered challans stay delivered' : 'Tick once the material reached the customer'}
+                >
+                  Delivered
+                </Checkbox>
+              )}
+            </Field>
             <Typography.Text>
               Total: <Typography.Text strong><Money value={total} /></Typography.Text>
             </Typography.Text>

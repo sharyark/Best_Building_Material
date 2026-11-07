@@ -78,7 +78,7 @@ export default function OpeningPage() {
       if (stockRows.length) await api.post('/stock/opening', stockRows)
       message.success(balances.length + stockRows.length ? `Saved ${balances.length + stockRows.length} opening entr${balances.length + stockRows.length === 1 ? 'y' : 'ies'}` : 'Nothing changed')
       setLoaded(false)
-      await qc.invalidateQueries()
+      void qc.invalidateQueries()
     } catch (e) {
       message.error(apiError(e).message, 6)
     } finally {

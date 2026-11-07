@@ -57,6 +57,13 @@ if (-not (Test-Path ".env")) {
     Copy-Item ".env.example" ".env"
     Step "Created backend\.env from .env.example"
 }
+# Older .env files point at "localhost"; on Windows that tries IPv6 first and every new DB connection waits ~2s,
+# which shows up as the Save button spinning after each entry.
+$envText = Get-Content ".env" -Raw
+if ($envText -match "@localhost:5432") {
+    Set-Content ".env" ($envText -replace "@localhost:5432", "@127.0.0.1:5432") -NoNewline
+    Step "Fixed backend\.env: database address is now 127.0.0.1"
+}
 
 $VenvPy = "$Root\backend\.venv\Scripts\python.exe"
 if (-not (Test-Path $VenvPy)) {

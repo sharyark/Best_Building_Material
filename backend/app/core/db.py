@@ -39,7 +39,9 @@ def make_engine(url: str) -> Engine:
         if ":memory:" in url or url.endswith("sqlite://"):
             kwargs["poolclass"] = StaticPool
         return create_engine(url, **kwargs)
-    return create_engine(url, pool_pre_ping=True)
+    # After every save the UI refetches ~11 screens at once; a pool that size keeps connections open instead of
+    # opening (slow on Windows + Docker) and closing overflow connections on each save.
+    return create_engine(url, pool_pre_ping=True, pool_size=12, max_overflow=10)
 
 
 engine = make_engine(get_settings().database_url)

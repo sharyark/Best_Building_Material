@@ -28,7 +28,7 @@ def test_export_defaults_to_today_and_includes_voided(world):
     col = {name: i for i, name in enumerate(header)}
     assert body[0][col["Total"]] == "6000.00" and body[0][col["Notes"]] == "gate 3"
     assert body[1][col["Status"]] == "Void" and body[1][col["Void reason"]] == "wrong customer"
-    assert total[0] == "Total (1 active)" and total[col["Total"]] == "6000.00"
+    assert total[0] == "Total (1 delivered)" and total[col["Total"]] == "6000.00"
     assert body[0][col["Edited"]] == ""
     assert "Cost" not in ",".join(header)  # no profit data for the munshi
 

@@ -15,7 +15,7 @@ class Settings(BaseSettings):
     business_name: str = "Construction Material Supply"
     env: Literal["dev", "test", "prod"] = "dev"
 
-    database_url: str = "postgresql+psycopg://hisaab:hisaab@localhost:5432/hisaab"
+    database_url: str = "postgresql+psycopg://hisaab:hisaab@127.0.0.1:5432/hisaab"
     # Dev/test convenience: build tables from the models instead of running Alembic.
     auto_create_tables: bool = False
 

@@ -229,3 +229,47 @@ def test_advance_bigger_than_pay_carries_into_next_month(world):
     s2 = world.post("/labour/settlements", {"staff_id": worker["id"], "period_from": str(this_month),
                                             "period_to": str(TODAY)})  # fmt: skip
     assert s2["net_payable"] == "0.00" and world.balance(worker["account_id"]) == "0.0"
+
+
+def test_salary_and_trip_paid_together_clear_both_sides(world):
+    driver = world.driver["id"]
+    world.c.patch(f"/api/v1/masters/staff/{driver}", json={"wage_amount": "15000", "trip_rate": "200"}, headers=world.h)
+    purchase(world, "10", "2000")
+    challan(world, "2", driver_id=driver)  # 2 trolleys = 2 trips = 400
+    world.post(
+        "/labour/settlements", {"staff_id": driver, "period_from": str(TODAY.replace(day=1)), "period_to": str(TODAY)}
+    )
+
+    dues = world.get(f"/labour/dues/{driver}")
+    assert D(dues["trip_owed"]) == 400 and D(dues["salary_owed"]) == 15000 and D(dues["total_owed"]) == 15400
+
+    p = world.post(
+        "/payments",
+        {"date": str(TODAY), "direction": "out", "staff_id": driver, "purpose": "sal_trip", "amount": "15400",
+         "trip_amount": "400", "money_account_id": world.cash["id"], "mode": "cash"},
+    )  # fmt: skip
+    assert p["trip_amount"] == "400.00"
+    k = khata(world)
+    assert D(k["trip_paid"]) == 400 and D(k["trip_balance"]) == 0
+    assert D(k["salary_paid"]) == 15000 and D(k["salary_balance"]) == 0 and D(k["balance_payable"]) == 0
+    assert D(world.get(f"/labour/dues/{driver}")["total_owed"]) == 0
+    assert any("salary 15,000.00 + trip money 400.00" in r["narration"] for r in k_rows(world))
+
+    pdf = world.c.get(f"/api/v1/payments/{p['id']}/pdf", headers=world.h)
+    assert pdf.status_code == 200
+    assert_books_balance(world)
+
+
+def test_salary_and_trip_needs_a_sensible_trip_part(world):
+    body = {"date": str(TODAY), "direction": "out", "staff_id": world.driver["id"], "purpose": "sal_trip",
+            "amount": "1000", "money_account_id": world.cash["id"], "mode": "cash"}  # fmt: skip
+    for trip, code in ((None, "TRIP_PART_REQUIRED"), ("1000.01", "TRIP_PART_TOO_BIG")):
+        r = world.c.post("/api/v1/payments", json={**body, "trip_amount": trip}, headers=world.h)
+        assert r.status_code == 400 and r.json()["code"] == code
+    # all trip or all salary is fine: one option pays whatever is owed
+    for trip in ("1000", "0"):
+        world.post("/payments", {**body, "trip_amount": trip})
+
+
+def k_rows(w):
+    return w.get(f"/reports/staff-khata/{w.driver['id']}")["rows"]

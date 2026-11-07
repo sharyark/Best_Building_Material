@@ -1,7 +1,7 @@
-import { App, Button, Card, Descriptions, Input, Select, Space, Table, Typography } from 'antd'
+import { Alert, App, Button, Card, Descriptions, Input, Select, Space, Table, Typography } from 'antd'
 import type { ColumnsType } from 'antd/es/table'
 import dayjs from 'dayjs'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { api, apiError } from '@/api/client'
 import { useGet, useSave } from '@/api/hooks'
@@ -27,7 +27,7 @@ const REASONS = [
 ]
 
 export default function Settlements() {
-  const { message } = App.useApp()
+  const { message, modal } = App.useApp()
   const lookups = useLookups()
   const canSettle = usePermission('wages.settle')
   const [staffId, setStaffId] = useState<number | null>(null)
@@ -38,6 +38,18 @@ export default function Settlements() {
   const [detail, setDetail] = useState('')
   const [loading, setLoading] = useState(false)
   const list = useGet<Settlement[]>('/labour/settlements', { staff_id: staffId })
+  // A settlement covers its dates up to and including its end, so the next one starts the day after.
+  const lastSettledTo = staffId
+    ? (list.data ?? []).filter((s) => s.staff_id === staffId && s.status === 'active').reduce<string | null>((m, s) => (m && m > s.period_to ? m : s.period_to), null)
+    : null
+  const nextStart = lastSettledTo ? dayjs(lastSettledTo).add(1, 'day').format(API_DATE) : null
+  // Fill the dates once per chosen worker, so a date the munshi then changes is left alone.
+  const [filledFor, setFilledFor] = useState<number | null>(null)
+  useEffect(() => {
+    if (!staffId || filledFor === staffId || list.isFetching || !list.data) return
+    setFilledFor(staffId)
+    if (nextStart) setRange([nextStart, nextStart > today() ? nextStart : today()])
+  }, [staffId, filledFor, list.isFetching, list.data, nextStart])
   const save = useSave<object>('post', '/labour/settlements', {
     successMessage: 'Settlement saved and posted to the books',
     onSuccess: () => { setPreview(null); setDeductions('0'); setReason(undefined); setDetail('') },
@@ -91,8 +103,29 @@ export default function Settlements() {
           <Button onClick={load} loading={loading} disabled={!staffId}>Calculate</Button>
           {staffId && <Link to={`/reports/staff-khata?staff=${staffId}`}><Button type="link">Open khata</Button></Link>}
         </Space>
+        {staffId && filledFor === staffId && (
+          <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>
+            {lastSettledTo
+              ? `Last settled up to ${formatDate(lastSettledTo)}, so the next one starts on ${formatDate(nextStart!)}.`
+              : 'No settlement yet for this worker: pick the first day to settle from.'}
+          </Typography.Text>
+        )}
         {preview && (
           <div style={{ marginTop: 16 }}>
+            {preview.gap_from && preview.gap_to && (
+              <Alert
+                showIcon
+                type="warning"
+                style={{ marginBottom: 12 }}
+                message={`${formatDate(preview.gap_from)} to ${formatDate(preview.gap_to)} is not in any settlement`}
+                description={`The last settlement ended on ${formatDate(preview.last_settled_to!)}. If this one starts later, the pay for the days in between is never counted.`}
+                action={
+                  <Button size="small" type="primary" onClick={() => { setRange([preview.gap_from!, range[1]]); setPreview(null) }}>
+                    Start from {formatDate(preview.gap_from)}
+                  </Button>
+                }
+              />
+            )}
             <Descriptions size="small" column={{ xs: 1, sm: 2, lg: 4 }} bordered>
               <Descriptions.Item label="Pay type">{preview.wage_type.replace('_', ' ')}</Descriptions.Item>
               <Descriptions.Item label="Days present">{formatQty(preview.days)}</Descriptions.Item>
@@ -118,7 +151,18 @@ export default function Settlements() {
                 <Button type="primary" loading={save.isPending}
                   onClick={() => {
                     if (Number(deductions) > 0 && !reasonText) { message.warning('Choose why the pay is cut (Chutti, Jurmana...) so it shows in the khata.'); return }
-                    save.mutate({ staff_id: staffId, period_from: range[0], period_to: range[1], deductions: deductions || '0', deduction_reason: Number(deductions) > 0 ? reasonText : null })
+                    const body = { staff_id: staffId, period_from: range[0], period_to: range[1], deductions: deductions || '0', deduction_reason: Number(deductions) > 0 ? reasonText : null }
+                    if (preview.gap_from && preview.gap_to) {
+                      modal.confirm({
+                        title: 'Leave some days unsettled?',
+                        content: `${formatDate(preview.gap_from)} to ${formatDate(preview.gap_to)} is not in any settlement, so the pay for those days will not be counted. Only do this if the worker was away.`,
+                        okText: 'Yes, leave the gap',
+                        cancelText: 'Go back',
+                        onOk: () => save.mutate({ ...body, allow_gap: true }),
+                      })
+                      return
+                    }
+                    save.mutate(body)
                   }}>Save settlement</Button>
               </Space>
               <Typography.Text type="secondary" style={{ display: 'block', marginTop: 6 }}>

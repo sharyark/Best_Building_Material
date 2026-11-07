@@ -333,6 +333,15 @@ def run(db) -> None:
         ))  # fmt: skip
     db.commit()
 
+    # ---- two orders sent out today, not marked delivered yet (not in any khata) -----------------------------
+    last_day = cutover + dt.timedelta(days=DAYS)
+    for cust, name, veh in ((customers[0], "Rait (Sand)", fleet[0]), (customers[1], "Crush", fleet[1])):
+        deliveries.create(db, DeliveryIn(
+            date=last_day, customer_id=cust.id, site_id=sites[cust.id][0].id, material_id=materials[name].id,
+            qty=Decimal(1), vehicle_id=veh.id, driver_id=next(d.id for d in drivers if d.default_vehicle_id == veh.id),
+            delivered=False, notes="Order: on the way",
+        ))  # fmt: skip
+
     # ---- settlements, a bill, a count -----------------------------------------------------------
     for end in sorted(month_ends):
         start = end.replace(day=1)

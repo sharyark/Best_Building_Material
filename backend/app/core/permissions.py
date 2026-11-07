@@ -8,7 +8,7 @@ ACCOUNTANT = {
     "purchase.create",
     "purchase.update",
     "challan.create",
-    "challan.update",
+    "challan.update",  # pending orders only; a delivered challan needs "challan.edit_delivered" (owner)
     "rental.create",
     "rental.update",
     "payment.create",

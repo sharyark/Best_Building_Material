@@ -171,6 +171,8 @@ export interface Delivery extends DocBase {
   trip_pay: Decimal
   invoice_id: number | null
   receipt_id: number | null
+  delivered: boolean
+  delivered_at: string | null
 }
 export type LoadUnit = 'dumper' | 'bucket'
 export type LoadSize = 'full' | 'half'
@@ -197,9 +199,20 @@ export interface Payment extends DocBase {
   staff_id: number | null
   money_account_id: number
   mode: 'cash' | 'bank' | 'cheque' | 'online'
-  purpose: 'general' | 'advance' | 'salary' | 'trip'
+  purpose: PaymentPurpose
   ref_no: string | null
   amount: Decimal
+  /** 'sal_trip' only: the trip money part; the rest is salary. */
+  trip_amount: Decimal
+}
+/** 'sal_trip' = salary and trip money paid together. */
+export type PaymentPurpose = 'general' | 'advance' | 'salary' | 'trip' | 'sal_trip'
+/** What a worker is owed now (positive = we owe; salary can be negative while an advance is outstanding). */
+export interface StaffDues {
+  staff_id: number
+  trip_owed: Decimal
+  salary_owed: Decimal
+  total_owed: Decimal
 }
 export type ExpenseCategory = 'diesel' | 'food' | 'repair' | 'tyre' | 'insurance' | 'toll' | 'office' | 'misc'
 export interface Expense extends DocBase {
@@ -298,6 +311,11 @@ export interface SettlementPreview {
   carried_forward: Decimal
   /** Left to pay after settling, before deductions; negative = nothing to pay, they still owe that much. */
   net_before_deductions: Decimal
+  /** Last day already settled before this period (null = first settlement). */
+  last_settled_to: string | null
+  /** Unsettled days between the last settlement and this period; their pay would be missed. */
+  gap_from: string | null
+  gap_to: string | null
 }
 export interface Settlement {
   id: number
@@ -334,6 +352,8 @@ export interface Dashboard {
   date: string
   trips_today: number
   trips_yesterday: number
+  /** Challans saved as orders and not yet marked delivered (any date). */
+  pending_orders: number
   trips_by_material: { material: string; unit: string; trips: number; qty: Decimal }[]
   sales_today: Decimal
   sales_yesterday: Decimal
